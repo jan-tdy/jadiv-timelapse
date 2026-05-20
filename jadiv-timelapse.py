@@ -55,7 +55,14 @@ class TimelapseApp:
 
         # 4. Riadok: Rozlíšenie
         ttk.Label(frame, text="Rozlíšenie videa:").grid(row=4, column=0, sticky=tk.W, pady=5)
-        resolutions = ["Full HD (Plynulé prehrávanie)", "4K (Vysoká kvalita)", "Originál (Môže sekať pc)"]
+        resolutions = [
+            "4K (Vysoká kvalita)",
+            "Full HD (Plynulé prehrávanie)", 
+            "HD (720p)",
+            "SD (480p - malé)",
+            "Nízka kvalita (240p - veľmi malé)",
+            "Originál (Môže sekať pc)"
+        ]
         ttk.Combobox(frame, textvariable=self.resolution, values=resolutions, state="readonly", width=37).grid(row=4, column=1, padx=10, pady=5, sticky=tk.W)
 
         # 5. Riadok: Progress bar
@@ -104,6 +111,7 @@ class TimelapseApp:
 
     def process_video(self, input_folder, output_file, fps, resolution_choice):
         try:
+            # Hľadáme aj veľké JPG z Nikonu
             extensions = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
             images = []
             for ext in extensions:
@@ -134,6 +142,15 @@ class TimelapseApp:
             elif "4K" in resolution_choice:
                 target_width = 3840
                 target_height = int((3840 / width) * height)
+            elif "720p" in resolution_choice:
+                target_height = 720
+                target_width = int((720 / height) * width)
+            elif "480p" in resolution_choice:
+                target_height = 480
+                target_width = int((480 / height) * width)
+            elif "240p" in resolution_choice:
+                target_height = 240
+                target_width = int((240 / height) * width)
                 
             # Kodeky MP4 vyžadujú, aby šírka aj výška boli párne čísla, inak zlyhajú
             target_width = target_width - (target_width % 2)
@@ -149,6 +166,7 @@ class TimelapseApp:
                     img = cv2.imread(image_path)
                     if img is None:
                         continue
+                        
                     # Zabezpečenie rozmerov a zmenšenie pomocou vysoko-kvalitného INTER_AREA algoritmu
                     if img.shape[:2] != (target_height, target_width):
                         img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
@@ -161,26 +179,7 @@ class TimelapseApp:
             finally:
                 video.release()
 
-            self.root.after(0, self.finish_processing, "Video bolo úspešne vytvorené!", True)
-
-            try:
-                total_images = len(images)
-                for i, image_path in enumerate(images):
-                    img = cv2.imread(image_path)
-                    if img is None:
-                        continue
-                    # Zabezpečenie rozmerov a zmenšenie pomocou vysoko-kvalitného INTER_AREA algoritmu
-                    if img.shape[:2] != (target_height, target_width):
-                        img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
-                    
-                    video.write(img)
-                    
-                    # Aktualizácia progress baru cez hlavné vlákno
-                    progress_percent = ((i + 1) / total_images) * 100
-                    self.root.after(0, self.update_progress, progress_percent, f"Spracované: {i + 1} / {total_images}")
-            finally:
-                video.release()
-
+            # Úspešné dokončenie
             self.root.after(0, self.finish_processing, "Video bolo úspešne vytvorené!", True)
 
         except Exception as e:
