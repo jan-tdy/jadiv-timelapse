@@ -159,8 +159,6 @@ class TimelapseApp:
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             # Inicializácia VideoWriter
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            video = cv2.VideoWriter(output_file, fourcc, fps, (target_width, target_height))
-
             try:
                 total_images = len(images)
                 for i, image_path in enumerate(images):
@@ -175,6 +173,9 @@ class TimelapseApp:
                     
                     # Aktualizácia progress baru cez hlavné vlákno
                     progress_percent = ((i + 1) / total_images) * 100
+                    self.root.after(0, self.update_progress, progress_percent, f"Spracované: {i + 1} / {total_images}")
+            finally:
+                video.release()
                     self.root.after(0, self.update_progress, progress_percent, f"Spracované: {i + 1} / {total_images}")
             finally:
                 video.release()
