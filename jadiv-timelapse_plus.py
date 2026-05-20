@@ -111,6 +111,7 @@ class TimelapseApp:
 
     def process_video(self, input_folder, output_file, fps, resolution_choice):
         try:
+            # Hľadáme aj veľké JPG z Nikonu
             extensions = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
             images = []
             for ext in extensions:
@@ -155,16 +156,17 @@ class TimelapseApp:
             target_width = target_width - (target_width % 2)
             target_height = target_height - (target_height % 2)
 
-            # Inicializácia VideoWriter
+            # Inicializácia VideoWriter - TOTO V TVOJOM KÓDE CHÝBALO
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            # Inicializácia VideoWriter
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            video = cv2.VideoWriter(output_file, fourcc, fps, (target_width, target_height))
+
             try:
                 total_images = len(images)
                 for i, image_path in enumerate(images):
                     img = cv2.imread(image_path)
                     if img is None:
                         continue
+                        
                     # Zabezpečenie rozmerov a zmenšenie pomocou vysoko-kvalitného INTER_AREA algoritmu
                     if img.shape[:2] != (target_height, target_width):
                         img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
@@ -176,26 +178,8 @@ class TimelapseApp:
                     self.root.after(0, self.update_progress, progress_percent, f"Spracované: {i + 1} / {total_images}")
             finally:
                 video.release()
-                    self.root.after(0, self.update_progress, progress_percent, f"Spracované: {i + 1} / {total_images}")
-            finally:
-                video.release()
 
-            total_images = len(images)
-            for i, image_path in enumerate(images):
-                img = cv2.imread(image_path)
-                if img is None:
-                    continue
-                # Zabezpečenie rozmerov a zmenšenie pomocou vysoko-kvalitného INTER_AREA algoritmu
-                if img.shape[:2] != (target_height, target_width):
-                    img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
-                
-                video.write(img)
-                
-                # Aktualizácia progress baru cez hlavné vlákno
-                progress_percent = ((i + 1) / total_images) * 100
-                self.root.after(0, self.update_progress, progress_percent, f"Spracované: {i + 1} / {total_images}")
-
-            video.release()
+            # Úspešné dokončenie
             self.root.after(0, self.finish_processing, "Video bolo úspešne vytvorené!", True)
 
         except Exception as e:
