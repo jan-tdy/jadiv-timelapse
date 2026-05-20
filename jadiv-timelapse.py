@@ -156,7 +156,7 @@ class TimelapseApp:
             target_width = target_width - (target_width % 2)
             target_height = target_height - (target_height % 2)
 
-            # Inicializácia VideoWriter - TOTO V TVOJOM KÓDE CHÝBALO
+            # Inicializácia VideoWriter
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             video = cv2.VideoWriter(output_file, fourcc, fps, (target_width, target_height))
 
