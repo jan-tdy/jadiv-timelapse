@@ -163,22 +163,24 @@ class TimelapseApp:
 
             self.root.after(0, self.finish_processing, "Video bolo úspešne vytvorené!", True)
 
-            total_images = len(images)
-            for i, image_path in enumerate(images):
-                img = cv2.imread(image_path)
-                if img is None:
-                    continue
-                # Zabezpečenie rozmerov a zmenšenie pomocou vysoko-kvalitného INTER_AREA algoritmu
-                if img.shape[:2] != (target_height, target_width):
-                    img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
-                
-                video.write(img)
-                
-                # Aktualizácia progress baru cez hlavné vlákno
-                progress_percent = ((i + 1) / total_images) * 100
-                self.root.after(0, self.update_progress, progress_percent, f"Spracované: {i + 1} / {total_images}")
+            try:
+                total_images = len(images)
+                for i, image_path in enumerate(images):
+                    img = cv2.imread(image_path)
+                    if img is None:
+                        continue
+                    # Zabezpečenie rozmerov a zmenšenie pomocou vysoko-kvalitného INTER_AREA algoritmu
+                    if img.shape[:2] != (target_height, target_width):
+                        img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                    
+                    video.write(img)
+                    
+                    # Aktualizácia progress baru cez hlavné vlákno
+                    progress_percent = ((i + 1) / total_images) * 100
+                    self.root.after(0, self.update_progress, progress_percent, f"Spracované: {i + 1} / {total_images}")
+            finally:
+                video.release()
 
-            video.release()
             self.root.after(0, self.finish_processing, "Video bolo úspešne vytvorené!", True)
 
         except Exception as e:
