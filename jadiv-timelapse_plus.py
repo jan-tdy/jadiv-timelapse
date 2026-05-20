@@ -162,7 +162,8 @@ class TimelapseApp:
             total_images = len(images)
             for i, image_path in enumerate(images):
                 img = cv2.imread(image_path)
-                
+                if img is None:
+                    continue
                 # Zabezpečenie rozmerov a zmenšenie pomocou vysoko-kvalitného INTER_AREA algoritmu
                 if img.shape[:2] != (target_height, target_width):
                     img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
