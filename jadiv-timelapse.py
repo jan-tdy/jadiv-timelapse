@@ -107,7 +107,7 @@ class TimelapseApp:
             extensions = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
             images = []
             for ext in extensions:
-                images.extend(glob.glob(input_folder + ext))
+                images.extend(glob.glob(glob.escape(input_folder) + ext))
             
             # Zoradenie podľa abecedy/čísel
             images = sorted(images)
