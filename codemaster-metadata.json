@@ -8,7 +8,7 @@
       "id": "jadiv-timelapse",
       "name": "Jadiv Timelapse",
       "tagline": "Create timelapses from image sequences",
-      "description": "A simple PyQt5 tool for turning a folder of images into a timelapse video using OpenCV. The 'plus' edition adds a graphical interface for picking frames, frame rate and output format.",
+      "description": "A simple PyQt5 tool for turning a folder of images into a timelapse video using OpenCV. The 'plus' edition adds a graphical interface for selecting the input folder, output file, frame rate, and resolution.",
       "category": "Photography",
       "version": "1.0.0",
       "author": "JapySoft TDY",
