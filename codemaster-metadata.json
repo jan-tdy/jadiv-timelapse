@@ -12,7 +12,7 @@
       "category": "Photography",
       "version": "1.0.0",
       "author": "JapySoft TDY",
-      "icon": null,
+      "icon": "assets/jadiv-timelapse.svg",
       "subdir": ".",
       "entrypoint": "jadiv-timelapse_plus.py",
       "run": "python3 jadiv-timelapse_plus.py",
