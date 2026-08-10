@@ -62,13 +62,26 @@ class VideoWorker(QThread):
             # Výpočet nového rozlíšenia
             target_width = width
             target_height = height
-            
+
+            # Fotky na výšku (portrét): "Full HD"/"4K" udávajú dlhšiu stranu, preto sa
+            # pri portréte aplikujú na výšku, nie na šírku (inak by vyšlo napr. 1920x3413
+            # namiesto rozumného zvislého videa).
+            is_portrait = height > width
+
             if "Full HD" in self.resolution_choice:
-                target_width = 1920
-                target_height = int((1920 / width) * height)
+                if is_portrait:
+                    target_height = 1920
+                    target_width = int((1920 / height) * width)
+                else:
+                    target_width = 1920
+                    target_height = int((1920 / width) * height)
             elif "4K" in self.resolution_choice:
-                target_width = 3840
-                target_height = int((3840 / width) * height)
+                if is_portrait:
+                    target_height = 3840
+                    target_width = int((3840 / height) * width)
+                else:
+                    target_width = 3840
+                    target_height = int((3840 / width) * height)
             elif "720p" in self.resolution_choice:
                 target_height = 720
                 target_width = int((720 / height) * width)
@@ -401,6 +414,19 @@ class TimelapseApp(QWidget):
                 self.start_processing()
         else:
             super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        # Zabránime zatvoreniu okna, kým beží spracovanie na pozadí — inak by sa
+        # vlákno tvrdo ukončilo uprostred zápisu videa (poškodený súbor / pád Qt).
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            QMessageBox.warning(
+                self, "Spracovanie beží",
+                "Video sa ešte vytvára. Najprv spracovanie zruš tlačidlom \"Zrušiť\", "
+                "potom môžeš okno zavrieť."
+            )
+            event.ignore()
+        else:
+            event.accept()
 
 
 if __name__ == "__main__":

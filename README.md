@@ -4,11 +4,13 @@ Jednoduchý nástroj na vytvorenie timelapse videa zo sekvencie fotiek (napr. z 
 
 Projekt obsahuje tri nezávislé varianty s rovnakou funkcionalitou — vyber si podľa toho, čo ti vyhovuje:
 
-| Súbor | Popis | Vyžaduje |
-|---|---|---|
-| `jadiv-timelapse.py` | Jednoduché desktopové GUI (Tkinter) | Python 3, OpenCV |
-| `jadiv-timelapse_plus.py` | Pokročilejšie desktopové GUI s tmavým vzhľadom (PyQt5) | Python 3, OpenCV, PyQt5 |
-| `jadiv-timelapse_web.html` | Webová verzia bežiaca priamo v prehliadači, bez inštalácie | Moderný prehliadač (Chrome/Edge/Firefox) |
+| Súbor | Popis | Vyžaduje | Stav |
+|---|---|---|---|
+| `jadiv-timelapse_plus.py` | Pokročilejšie desktopové GUI s tmavým vzhľadom (PyQt5) — **odporúčaná verzia** | Python 3, OpenCV, PyQt5 | Udržiavaná |
+| `jadiv-timelapse_web.html` | Webová verzia bežiaca priamo v prehliadači, bez inštalácie | Moderný prehliadač (Chrome/Edge/Firefox) | Udržiavaná |
+| `jadiv-timelapse.py` | Jednoduché desktopové GUI (Tkinter) | Python 3, OpenCV | ⚠️ Neudržiavaná (legacy) |
+
+> **`jadiv-timelapse.py` (Tkinter verzia) je neudržiavaná.** Zostáva v repozitári pre ľudí, ktorí ju už používajú, ale ďalej sa nevyvíja a neopravujú sa v nej nové chyby. Pre nové inštalácie odporúčame `jadiv-timelapse_plus.py` alebo webovú verziu.
 
 ## Funkcie
 
@@ -35,13 +37,7 @@ sudo apt install python3-tk
 
 ## Použitie
 
-### Desktopová verzia (Tkinter)
-
-```bash
-python3 jadiv-timelapse.py
-```
-
-### Desktopová verzia Plus (PyQt5)
+### Desktopová verzia Plus (PyQt5) — odporúčané
 
 ```bash
 python3 jadiv-timelapse_plus.py
@@ -50,6 +46,12 @@ python3 jadiv-timelapse_plus.py
 ### Webová verzia
 
 Stačí otvoriť `jadiv-timelapse_web.html` v prehliadači (dvojklikom, alebo cez `File > Open`). Fotky sa spracúvajú lokálne v prehliadači, nikam sa neposielajú. Výstupom je video vo formáte `.webm`.
+
+### Desktopová verzia (Tkinter, neudržiavaná)
+
+```bash
+python3 jadiv-timelapse.py
+```
 
 V oboch desktopových verziách stačí:
 
@@ -65,6 +67,10 @@ Spracovanie je možné kedykoľvek prerušiť tlačidlom **Zrušiť**.
 - Fotky sa zoraďujú podľa názvu súboru pomocou tzv. prirodzeného (numerického) triedenia — `frame2.jpg` sa teda zoradí pred `frame10.jpg`, aj bez núl na začiatku čísla. Napriek tomu sa oplatí používať konzistentný formát názvov (napr. `IMG_0001.jpg`, `IMG_0002.jpg`, ...).
 - Poškodené alebo nečitateľné fotky sa pri spracovaní preskočia a do videa sa nezahrnú.
 - Kodeky pre MP4/WebM vyžadujú párnu šírku aj výšku videa — nástroj to rieši automaticky.
+
+## Vydania (Releases)
+
+Projekt vydáva verzie cez [GitHub Releases](https://github.com/jan-tdy/jadiv-timelapse/releases) — tag vydania je zároveň zobrazovaná verzia (napr. v JapySoft Code Master, ktorý appku sťahuje podľa najnovšieho vydania, nie podľa najnovšieho commitu na branchi).
 
 ## Licencia
 
