@@ -160,11 +160,15 @@
             <label for="imageFiles">Vybrať fotky:</label>
             <input type="file" id="imageFiles" class="form-control" multiple accept="image/jpeg, image/png, image/jpg">
         </div>
+        <div class="form-group">
+            <label></label>
+            <span id="fileCount" class="status" style="text-align: left; margin-top: 0;">Zatiaľ nie sú vybrané žiadne fotky.</span>
+        </div>
 
         <div class="form-group">
             <label for="fps">Rýchlosť (FPS):</label>
             <div class="fps-wrap">
-                <input type="number" id="fps" class="form-control" value="24" min="1" max="60">
+                <input type="number" id="fps" class="form-control" value="24" min="1" max="120">
                 <span>snímok za sekundu</span>
             </div>
         </div>
@@ -186,6 +190,7 @@
         <div class="status" id="statusText">Pripravený na prácu. (Video sa uloží ako .webm)</div>
 
         <button id="startBtn" class="btn-primary">VYTVORIŤ TIMELAPSE</button>
+        <button id="cancelBtn" class="btn-primary" style="display:none; margin-top: 10px; background-color: var(--danger-color);">ZRUŠIŤ</button>
 
         <!-- Skrytý canvas pre renderovanie videa -->
         <canvas id="previewCanvas"></canvas>
@@ -196,11 +201,22 @@
         const fpsInput = document.getElementById('fps');
         const resolutionSelect = document.getElementById('resolution');
         const startBtn = document.getElementById('startBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
         const progressWrapper = document.getElementById('progressWrapper');
         const progressBar = document.getElementById('progressBar');
         const statusText = document.getElementById('statusText');
+        const fileCount = document.getElementById('fileCount');
         const canvas = document.getElementById('previewCanvas');
         const ctx = canvas.getContext('2d');
+
+        let cancelRequested = false;
+
+        imageFilesInput.addEventListener('change', () => {
+            const n = imageFilesInput.files.length;
+            fileCount.innerText = n === 0
+                ? 'Zatiaľ nie sú vybrané žiadne fotky.'
+                : `Vybraných fotiek: ${n}`;
+        });
 
         // Funkcia na načítanie obrázka
         function loadImage(file) {
@@ -211,7 +227,10 @@
                     URL.revokeObjectURL(url);
                     resolve(img);
                 };
-                img.onerror = reject;
+                img.onerror = () => {
+                    URL.revokeObjectURL(url);
+                    reject(new Error(`Nepodarilo sa načítať súbor "${file.name}"`));
+                };
                 img.src = url;
             });
         }
@@ -219,9 +238,15 @@
         // Pomocná funkcia na čakanie (simulácia FPS)
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+        cancelBtn.addEventListener('click', () => {
+            cancelRequested = true;
+            cancelBtn.disabled = true;
+            statusText.innerText = 'Rušenie...';
+        });
+
         startBtn.addEventListener('click', async () => {
             const files = Array.from(imageFilesInput.files);
-            
+
             if (files.length === 0) {
                 alert('Prosím, vyberte aspoň jednu fotografiu.');
                 return;
@@ -234,21 +259,36 @@
             const targetWidthStr = parseInt(resolutionSelect.value, 10);
 
             // Uzamknutie UI
+            cancelRequested = false;
             startBtn.disabled = true;
+            startBtn.style.display = 'none';
+            cancelBtn.style.display = 'block';
+            cancelBtn.disabled = false;
             imageFilesInput.disabled = true;
             fpsInput.disabled = true;
             resolutionSelect.disabled = true;
-            
+
             progressWrapper.style.display = 'block';
             progressBar.style.width = '0%';
             statusText.innerText = 'Analyzujem prvú snímku...';
             statusText.style.color = '#0d6efd';
 
             try {
-                // 1. Zistiť rozmer z prvej fotky
-                const firstImg = await loadImage(files[0]);
+                // 1. Zistiť rozmer z prvej načítateľnej fotky (prvý súbor môže byť poškodený)
+                let firstImg = null;
+                for (const file of files) {
+                    try {
+                        firstImg = await loadImage(file);
+                        break;
+                    } catch (e) {
+                        console.warn(e);
+                    }
+                }
+                if (!firstImg) {
+                    throw new Error('Žiadnu z vybraných fotiek sa nepodarilo načítať.');
+                }
                 const aspect = firstImg.height / firstImg.width;
-                
+
                 let targetWidth = targetWidthStr;
                 let targetHeight = Math.round(targetWidth * aspect);
 
@@ -286,51 +326,76 @@
 
                 // 3. Renderovanie snímok na Canvas
                 const frameDurationMs = 1000 / fps;
-                
+                let drawnCount = 0;
+                let skippedCount = 0;
+                let wasCancelled = false;
+
                 for (let i = 0; i < files.length; i++) {
+                    if (cancelRequested) {
+                        wasCancelled = true;
+                        break;
+                    }
+
                     const t0 = performance.now();
-                    
+
                     statusText.innerText = `Spracovávam: ${i + 1} / ${files.length}`;
                     progressBar.style.width = `${((i + 1) / files.length) * 100}%`;
 
-                    // Načítať a vykresliť
-                    const img = await loadImage(files[i]);
-                    
+                    // Načítať a vykresliť; poškodenú/nečitateľnú fotku len preskočíme
+                    let img;
+                    try {
+                        img = await loadImage(files[i]);
+                    } catch (e) {
+                        console.warn(e);
+                        skippedCount++;
+                        continue;
+                    }
+
                     // Vykreslenie s "vyhladením" (analógia cv2.INTER_AREA vo webe)
                     ctx.imageSmoothingEnabled = true;
                     ctx.imageSmoothingQuality = 'high';
                     ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+                    drawnCount++;
 
                     // Vypočítať, koľko máme počkať, aby sme zachovali FPS
                     const t1 = performance.now();
                     const processTime = t1 - t0;
                     const waitTime = Math.max(0, frameDurationMs - processTime);
-                    
+
                     await sleep(waitTime);
                 }
 
                 // Trochu počkáme na poslednú snímku a zastavíme
-                await sleep(100); 
+                await sleep(100);
                 recorder.stop();
                 await recordingFinished;
 
-                // 4. Stiahnutie hotového videa
-                statusText.innerText = 'Video sa generuje a sťahuje...';
-                
-                const blob = new Blob(chunks, { type: 'video/webm' });
-                const videoUrl = URL.createObjectURL(blob);
-                
-                const downloadLink = document.createElement('a');
-                downloadLink.href = videoUrl;
-                downloadLink.download = 'jadiv_timelapse_web.webm';
-                document.body.appendChild(downloadLink);
-                downloadLink.click();
-                document.body.removeChild(downloadLink);
-                
-                setTimeout(() => URL.revokeObjectURL(videoUrl), 10000);
+                if (wasCancelled) {
+                    statusText.innerText = 'Spracovanie bolo zrušené.';
+                    statusText.style.color = '#aaa';
+                } else if (drawnCount === 0) {
+                    throw new Error('Ani jednu fotku sa nepodarilo spracovať, video nebolo vytvorené.');
+                } else {
+                    // 4. Stiahnutie hotového videa
+                    statusText.innerText = 'Video sa generuje a sťahuje...';
 
-                statusText.innerText = 'Hotovo! Video bolo stiahnuté.';
-                statusText.style.color = '#198754';
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    const videoUrl = URL.createObjectURL(blob);
+
+                    const downloadLink = document.createElement('a');
+                    downloadLink.href = videoUrl;
+                    downloadLink.download = 'jadiv_timelapse_web.webm';
+                    document.body.appendChild(downloadLink);
+                    downloadLink.click();
+                    document.body.removeChild(downloadLink);
+
+                    setTimeout(() => URL.revokeObjectURL(videoUrl), 10000);
+
+                    statusText.innerText = skippedCount > 0
+                        ? `Hotovo! Video bolo stiahnuté (preskočených poškodených fotiek: ${skippedCount}).`
+                        : 'Hotovo! Video bolo stiahnuté.';
+                    statusText.style.color = '#198754';
+                }
 
             } catch (err) {
                 console.error(err);
@@ -338,7 +403,10 @@
                 statusText.style.color = '#dc3545';
             } finally {
                 // Odomknutie UI
+                cancelRequested = false;
                 startBtn.disabled = false;
+                startBtn.style.display = 'block';
+                cancelBtn.style.display = 'none';
                 imageFilesInput.disabled = false;
                 fpsInput.disabled = false;
                 resolutionSelect.disabled = false;
