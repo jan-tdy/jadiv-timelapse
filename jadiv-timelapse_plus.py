@@ -14,6 +14,7 @@ class VideoWorker(QThread):
     """
     progress_update = pyqtSignal(int, str)
     finished = pyqtSignal(bool, str)
+    cancelled = pyqtSignal(str)
 
     def __init__(self, input_folder, output_file, fps, resolution_choice):
         super().__init__()
@@ -21,6 +22,10 @@ class VideoWorker(QThread):
         self.output_file = output_file
         self.fps = fps
         self.resolution_choice = resolution_choice
+        self._cancel_requested = False
+
+    def cancel(self):
+        self._cancel_requested = True
 
     def run(self):
         try:
@@ -42,8 +47,9 @@ class VideoWorker(QThread):
             if first_frame is None:
                 self.finished.emit(False, "Chyba: Prvý obrázok je poškodený a nedá sa načítať.")
                 return
-                
-            height, width, _ = first_frame.shape
+
+            # shape[:2] funguje pre farebné aj čiernobiele obrázky
+            height, width = first_frame.shape[:2]
 
             # Výpočet nového rozlíšenia
             target_width = width
@@ -73,25 +79,44 @@ class VideoWorker(QThread):
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             video = cv2.VideoWriter(self.output_file, fourcc, self.fps, (target_width, target_height))
 
+            if not video.isOpened():
+                self.finished.emit(False, "Chyba: Video sa nepodarilo vytvoriť. Skontroluj, či cieľový priečinok "
+                                           "existuje a či máš práva na zápis.")
+                return
+
+            was_cancelled = False
             try:
                 total_images = len(images)
                 for i, image_path in enumerate(images):
+                    if self._cancel_requested:
+                        was_cancelled = True
+                        break
+
                     img = cv2.imread(image_path)
                     if img is None:
                         continue
-                        
+
                     # Zmenšenie (INTER_AREA je najlepšie pre zmenšovanie kvality)
                     if img.shape[:2] != (target_height, target_width):
                         img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
-                    
+
                     video.write(img)
-                    
+
                     # Aktualizácia progress baru a textu
                     progress_percent = int(((i + 1) / total_images) * 100)
                     status_text = f"Spracované: {i + 1} / {total_images}"
                     self.progress_update.emit(progress_percent, status_text)
             finally:
                 video.release()
+
+            if was_cancelled:
+                if os.path.exists(self.output_file):
+                    try:
+                        os.remove(self.output_file)
+                    except OSError:
+                        pass
+                self.cancelled.emit("Spracovanie bolo zrušené.")
+                return
 
             # Úspešné dokončenie
             self.finished.emit(True, "Video bolo úspešne vytvorené a uložené!")
@@ -260,12 +285,22 @@ class TimelapseApp(QWidget):
         # Medzera
         main_layout.addSpacing(10)
 
-        # 5. Tlačidlo ŠTART
+        # 5. Tlačidlá ŠTART a Zrušiť
+        btn_layout = QHBoxLayout()
+
         self.start_btn = QPushButton("VYTVORIŤ TIMELAPSE")
         self.start_btn.setObjectName("actionBtn")
         self.start_btn.setCursor(Qt.PointingHandCursor)
         self.start_btn.clicked.connect(self.start_processing)
-        main_layout.addWidget(self.start_btn)
+        btn_layout.addWidget(self.start_btn, 1)
+
+        self.cancel_btn = QPushButton("Zrušiť")
+        self.cancel_btn.setCursor(Qt.PointingHandCursor)
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self.cancel_processing)
+        btn_layout.addWidget(self.cancel_btn)
+
+        main_layout.addLayout(btn_layout)
 
         self.setLayout(main_layout)
 
@@ -292,11 +327,12 @@ class TimelapseApp(QWidget):
 
         # Zamknutie UI
         self.start_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(True)
         self.input_folder_entry.setEnabled(False)
         self.output_file_entry.setEnabled(False)
         self.fps_spinbox.setEnabled(False)
         self.resolution_combo.setEnabled(False)
-        
+
         self.progress_bar.setValue(0)
         self.status_label.setText("Spracovávam... Prosím čakajte.")
         self.status_label.setStyleSheet("color: #0d6efd;")
@@ -304,24 +340,35 @@ class TimelapseApp(QWidget):
         # Spustenie vlákna
         fps = self.fps_spinbox.value()
         resolution = self.resolution_combo.currentText()
-        
+
         self.worker = VideoWorker(in_folder, out_file, fps, resolution)
         self.worker.progress_update.connect(self.update_progress)
         self.worker.finished.connect(self.processing_finished)
+        self.worker.cancelled.connect(self.processing_cancelled)
         self.worker.start()
+
+    def cancel_processing(self):
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.cancel()
+            self.cancel_btn.setEnabled(False)
+            self.status_label.setText("Rušenie...")
+            self.status_label.setStyleSheet("color: #888888;")
 
     def update_progress(self, percent, text):
         self.progress_bar.setValue(percent)
         self.status_label.setText(text)
 
-    def processing_finished(self, success, message):
-        # Odomknutie UI
+    def _unlock_ui(self):
         self.start_btn.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
         self.input_folder_entry.setEnabled(True)
         self.output_file_entry.setEnabled(True)
         self.fps_spinbox.setEnabled(True)
         self.resolution_combo.setEnabled(True)
-        
+
+    def processing_finished(self, success, message):
+        self._unlock_ui()
+
         if success:
             self.status_label.setText("Hotovo!")
             self.status_label.setStyleSheet("color: #198754;")
@@ -332,6 +379,12 @@ class TimelapseApp(QWidget):
             self.status_label.setStyleSheet("color: #dc3545;")
             self.progress_bar.setValue(0)
             QMessageBox.critical(self, "Chyba", message)
+
+    def processing_cancelled(self, message):
+        self._unlock_ui()
+        self.status_label.setText(message)
+        self.status_label.setStyleSheet("color: #888888;")
+        self.progress_bar.setValue(0)
 
     def keyPressEvent(self, event):
         # Ak stlačí Enter (Return), spustí sa timelapse

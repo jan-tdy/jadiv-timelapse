@@ -21,7 +21,11 @@ class TimelapseApp:
         self.output_file = tk.StringVar()
         self.fps = tk.IntVar(value=24)
         self.resolution = tk.StringVar(value="Full HD (Plynulé prehrávanie)")
-        
+
+        # Stav spracovania (ochrana proti opätovnému spusteniu a možnosť zrušenia)
+        self.is_processing = False
+        self.cancel_requested = False
+
         self.create_widgets()
         
         # Pridanie stlačenia klávesy Enter pre spustenie
@@ -73,9 +77,15 @@ class TimelapseApp:
         self.status_label = ttk.Label(frame, text="Pripravený", foreground="gray")
         self.status_label.grid(row=6, column=0, columnspan=3)
 
-        # 6. Riadok: Tlačidlo ŠTART
-        self.start_btn = ttk.Button(frame, text="VYTVORIŤ TIMELAPSE", command=self.start_processing)
-        self.start_btn.grid(row=7, column=0, columnspan=3, pady=(15, 0), ipadx=20, ipady=5)
+        # 6. Riadok: Tlačidlá ŠTART a Zrušiť
+        btn_frame = ttk.Frame(frame)
+        btn_frame.grid(row=7, column=0, columnspan=3, pady=(15, 0))
+
+        self.start_btn = ttk.Button(btn_frame, text="VYTVORIŤ TIMELAPSE", command=self.start_processing)
+        self.start_btn.pack(side=tk.LEFT, ipadx=20, ipady=5)
+
+        self.cancel_btn = ttk.Button(btn_frame, text="Zrušiť", command=self.cancel_processing, state=tk.DISABLED)
+        self.cancel_btn.pack(side=tk.LEFT, padx=(10, 0), ipadx=10, ipady=5)
 
     def browse_input(self):
         folder = filedialog.askdirectory(title="Vyber priečinok s obrázkami")
@@ -92,6 +102,10 @@ class TimelapseApp:
             self.output_file.set(file)
 
     def start_processing(self, event=None):
+        # Ochrana proti opätovnému spusteniu (napr. druhým stlačením Enter počas spracovania)
+        if self.is_processing:
+            return
+
         in_folder = self.input_folder.get()
         out_file = self.output_file.get()
 
@@ -100,7 +114,10 @@ class TimelapseApp:
             return
 
         # Zablokujeme tlačidlo počas práce
+        self.is_processing = True
+        self.cancel_requested = False
         self.start_btn.config(state=tk.DISABLED)
+        self.cancel_btn.config(state=tk.NORMAL)
         self.progress_var.set(0)
         self.status_label.config(text="Spracovávam...", foreground="blue")
 
@@ -108,6 +125,11 @@ class TimelapseApp:
         thread = threading.Thread(target=self.process_video, args=(in_folder, out_file, self.fps.get(), self.resolution.get()))
         thread.daemon = True
         thread.start()
+
+    def cancel_processing(self):
+        self.cancel_requested = True
+        self.cancel_btn.config(state=tk.DISABLED)
+        self.status_label.config(text="Rušenie...", foreground="orange")
 
     def process_video(self, input_folder, output_file, fps, resolution_choice):
         try:
@@ -129,8 +151,9 @@ class TimelapseApp:
             if first_frame is None:
                 self.root.after(0, self.finish_processing, "Chyba: Prvý obrázok je poškodený.", False)
                 return
-                
-            height, width, _ = first_frame.shape
+
+            # shape[:2] funguje pre farebné aj čiernobiele obrázky
+            height, width = first_frame.shape[:2]
 
             # Výpočet nového rozlíšenia podľa výberu (so zachovaním pomeru strán)
             target_width = width
@@ -160,24 +183,44 @@ class TimelapseApp:
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             video = cv2.VideoWriter(output_file, fourcc, fps, (target_width, target_height))
 
+            if not video.isOpened():
+                self.root.after(0, self.finish_processing,
+                                 "Chyba: Video sa nepodarilo vytvoriť. Skontroluj, či cieľový priečinok existuje "
+                                 "a či máš práva na zápis.", False)
+                return
+
+            cancelled = False
             try:
                 total_images = len(images)
                 for i, image_path in enumerate(images):
+                    if self.cancel_requested:
+                        cancelled = True
+                        break
+
                     img = cv2.imread(image_path)
                     if img is None:
                         continue
-                        
+
                     # Zabezpečenie rozmerov a zmenšenie pomocou vysoko-kvalitného INTER_AREA algoritmu
                     if img.shape[:2] != (target_height, target_width):
                         img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
-                    
+
                     video.write(img)
-                    
+
                     # Aktualizácia progress baru cez hlavné vlákno
                     progress_percent = ((i + 1) / total_images) * 100
                     self.root.after(0, self.update_progress, progress_percent, f"Spracované: {i + 1} / {total_images}")
             finally:
                 video.release()
+
+            if cancelled:
+                if os.path.exists(output_file):
+                    try:
+                        os.remove(output_file)
+                    except OSError:
+                        pass
+                self.root.after(0, self.finish_processing, "Spracovanie bolo zrušené.", None)
+                return
 
             # Úspešné dokončenie
             self.root.after(0, self.finish_processing, "Video bolo úspešne vytvorené!", True)
@@ -190,13 +233,19 @@ class TimelapseApp:
         self.status_label.config(text=text)
 
     def finish_processing(self, message, success):
+        self.is_processing = False
+        self.cancel_requested = False
         self.start_btn.config(state=tk.NORMAL)
-        if success:
+        self.cancel_btn.config(state=tk.DISABLED)
+        if success is True:
             self.status_label.config(text="Hotovo!", foreground="green")
             messagebox.showinfo("Úspech", message)
-        else:
+        elif success is False:
             self.status_label.config(text="Chyba", foreground="red")
             messagebox.showerror("Chyba", message)
+        else:
+            # success is None -> spracovanie bolo zrušené používateľom
+            self.status_label.config(text="Zrušené", foreground="gray")
         self.progress_var.set(0)
 
 if __name__ == "__main__":
