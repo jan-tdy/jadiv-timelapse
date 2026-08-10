@@ -7,7 +7,7 @@ Projekt obsahuje tri nezávislé varianty s rovnakou funkcionalitou — vyber si
 | Súbor | Popis | Vyžaduje | Stav |
 |---|---|---|---|
 | `jadiv-timelapse_plus.py` | Pokročilejšie desktopové GUI s tmavým vzhľadom (PyQt5) — **odporúčaná verzia** | Python 3, OpenCV, PyQt5 | Udržiavaná |
-| `jadiv-timelapse_web.html` | Webová verzia bežiaca priamo v prehliadači, bez inštalácie | Moderný prehliadač (Chrome/Edge/Firefox) | Udržiavaná |
+| `docs/index.html` | Webová verzia — beží priamo v prehliadači, bez inštalácie | Moderný prehliadač (Chrome/Edge/Firefox) | Udržiavaná |
 | `jadiv-timelapse.py` | Jednoduché desktopové GUI (Tkinter) | Python 3, OpenCV | ⚠️ Neudržiavaná (legacy) |
 
 > **`jadiv-timelapse.py` (Tkinter verzia) je neudržiavaná.** Zostáva v repozitári pre ľudí, ktorí ju už používajú, ale ďalej sa nevyvíja a neopravujú sa v nej nové chyby. Pre nové inštalácie odporúčame `jadiv-timelapse_plus.py` alebo webovú verziu.
@@ -45,7 +45,9 @@ python3 jadiv-timelapse_plus.py
 
 ### Webová verzia
 
-Stačí otvoriť `jadiv-timelapse_web.html` v prehliadači (dvojklikom, alebo cez `File > Open`). Fotky sa spracúvajú lokálne v prehliadači, nikam sa neposielajú. Výstupom je video vo formáte `.webm`.
+Beží priamo na **[jan-tdy.github.io/jadiv-timelapse](https://jan-tdy.github.io/jadiv-timelapse/)** (GitHub Pages) — netreba nič inštalovať, stačí otvoriť odkaz v prehliadači.
+
+Dá sa aj spustiť lokálne bez internetu — stiahni si `docs/index.html` a otvor ho v prehliadači (dvojklikom, alebo cez `File > Open`). Fotky sa v oboch prípadoch spracúvajú lokálne v prehliadači, nikam sa neposielajú. Výstupom je video vo formáte `.webm`.
 
 ### Desktopová verzia (Tkinter, neudržiavaná)
 
