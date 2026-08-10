@@ -2,8 +2,15 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import cv2
 import glob
+import re
 import threading
 import os
+
+
+def natural_sort_key(path):
+    """Rozdelí cestu na text/čísla, aby sa fotky triedili číselne (napr. 2 pred 10), nie čisto abecedne."""
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', path)]
+
 
 class TimelapseApp:
     def __init__(self, root):
@@ -135,12 +142,13 @@ class TimelapseApp:
         try:
             # Hľadáme aj veľké JPG z Nikonu
             extensions = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
-            images = []
+            images = set()
             for ext in extensions:
-                images.extend(glob.glob(glob.escape(input_folder) + ext))
-            
-            # Zoradenie podľa abecedy/čísel
-            images = sorted(images)
+                images.update(glob.glob(glob.escape(input_folder) + ext))
+
+            # Zoradenie podľa čísel v názve (napr. 2 pred 10), nie čisto abecedne;
+            # set() vyššie zároveň odstráni duplicity (na Windows/macOS by "*.jpg" a "*.JPG" inak našli tie isté súbory dvakrát)
+            images = sorted(images, key=natural_sort_key)
 
             if not images:
                 self.root.after(0, self.finish_processing, "Chyba: Nenašli sa žiadne obrázky.", False)

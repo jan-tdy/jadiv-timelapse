@@ -1,12 +1,19 @@
 import sys
 import os
 import glob
+import re
 import cv2
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QLineEdit, QPushButton, QComboBox, 
+from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+                             QLabel, QLineEdit, QPushButton, QComboBox,
                              QSpinBox, QProgressBar, QFileDialog, QMessageBox)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QIcon
+
+
+def natural_sort_key(path):
+    """Rozdelí cestu na text/čísla, aby sa fotky triedili číselne (napr. 2 pred 10), nie čisto abecedne."""
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', path)]
+
 
 class VideoWorker(QThread):
     """
@@ -31,12 +38,13 @@ class VideoWorker(QThread):
         try:
             # Hľadáme aj veľké JPG z Nikonu
             extensions = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
-            images = []
+            images = set()
             for ext in extensions:
-                images.extend(glob.glob(glob.escape(self.input_folder) + ext))
-            
-            # Zoradenie podľa abecedy/čísel
-            images = sorted(images)
+                images.update(glob.glob(glob.escape(self.input_folder) + ext))
+
+            # Zoradenie podľa čísel v názve (napr. 2 pred 10), nie čisto abecedne;
+            # set() vyššie zároveň odstráni duplicity (na Windows/macOS by "*.jpg" a "*.JPG" inak našli tie isté súbory dvakrát)
+            images = sorted(images, key=natural_sort_key)
 
             if not images:
                 self.finished.emit(False, "Chyba: Nenašli sa žiadne obrázky v danom priečinku.")

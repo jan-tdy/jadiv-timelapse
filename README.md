@@ -62,7 +62,7 @@ Spracovanie je možné kedykoľvek prerušiť tlačidlom **Zrušiť**.
 
 ## Poznámky
 
-- Fotky sa zoraďujú podľa názvu súboru (abecedne/numericky), preto sa oplatí pomenovávať ich s predponou v tvare, ktorý zachováva správne poradie (napr. `IMG_0001.jpg`, `IMG_0002.jpg`, ...).
+- Fotky sa zoraďujú podľa názvu súboru pomocou tzv. prirodzeného (numerického) triedenia — `frame2.jpg` sa teda zoradí pred `frame10.jpg`, aj bez núl na začiatku čísla. Napriek tomu sa oplatí používať konzistentný formát názvov (napr. `IMG_0001.jpg`, `IMG_0002.jpg`, ...).
 - Poškodené alebo nečitateľné fotky sa pri spracovaní preskočia a do videa sa nezahrnú.
 - Kodeky pre MP4/WebM vyžadujú párnu šírku aj výšku videa — nástroj to rieši automaticky.
 
