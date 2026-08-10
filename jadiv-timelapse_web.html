@@ -178,9 +178,9 @@
             <select id="resolution" class="form-control">
                 <option value="3840">4K (Vysoká kvalita)</option>
                 <option value="1920" selected>Full HD (Plynulé prehrávanie)</option>
-                <option value="1280">HD (720p)</option>
-                <option value="854">SD (480p - malé)</option>
-                <option value="426">Nízka kvalita (240p - veľmi malé)</option>
+                <option value="720">HD (720p)</option>
+                <option value="480">SD (480p - malé)</option>
+                <option value="240">Nízka kvalita (240p - veľmi malé)</option>
             </select>
         </div>
 
@@ -210,6 +210,15 @@
         const ctx = canvas.getContext('2d');
 
         let cancelRequested = false;
+        let isProcessing = false;
+
+        // Upozorní pri zatvorení/opustení stránky, kým beží spracovanie (video by sa stratilo)
+        window.addEventListener('beforeunload', (e) => {
+            if (isProcessing) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
 
         imageFilesInput.addEventListener('change', () => {
             const n = imageFilesInput.files.length;
@@ -256,10 +265,18 @@
             files.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
 
             const fps = parseInt(fpsInput.value, 10);
-            const targetWidthStr = parseInt(resolutionSelect.value, 10);
+            if (!Number.isFinite(fps) || fps < 1 || fps > 120) {
+                alert('Rýchlosť (FPS) musí byť celé číslo medzi 1 a 120.');
+                return;
+            }
+
+            const resolutionOption = resolutionSelect.options[resolutionSelect.selectedIndex];
+            const resolutionValue = parseInt(resolutionOption.value, 10);
+            const resolutionLabel = resolutionOption.text;
 
             // Uzamknutie UI
             cancelRequested = false;
+            isProcessing = true;
             startBtn.disabled = true;
             startBtn.style.display = 'none';
             cancelBtn.style.display = 'block';
@@ -287,10 +304,26 @@
                 if (!firstImg) {
                     throw new Error('Žiadnu z vybraných fotiek sa nepodarilo načítať.');
                 }
-                const aspect = firstImg.height / firstImg.width;
+                const isPortrait = firstImg.height > firstImg.width;
+                let targetWidth, targetHeight;
 
-                let targetWidth = targetWidthStr;
-                let targetHeight = Math.round(targetWidth * aspect);
+                if (resolutionLabel.includes('4K') || resolutionLabel.includes('Full HD')) {
+                    // "4K"/"Full HD" udávajú dlhšiu (vodorovnú) stranu videa. Pri fotke na výšku
+                    // (portrét) sa preto aplikujú na výšku, nie na šírku — inak by vyšlo
+                    // absurdne vysoké video namiesto rozumného zvislého formátu.
+                    if (isPortrait) {
+                        targetHeight = resolutionValue;
+                        targetWidth = Math.round((resolutionValue / firstImg.height) * firstImg.width);
+                    } else {
+                        targetWidth = resolutionValue;
+                        targetHeight = Math.round((resolutionValue / firstImg.width) * firstImg.height);
+                    }
+                } else {
+                    // "720p"/"480p"/"240p" udávajú počet riadkov (výšku) a platí to bez ohľadu
+                    // na orientáciu fotky.
+                    targetHeight = resolutionValue;
+                    targetWidth = Math.round((resolutionValue / firstImg.height) * firstImg.width);
+                }
 
                 // Zabezpečenie párnych čísel (vyžadujú to video kodeky)
                 targetWidth -= targetWidth % 2;
@@ -298,6 +331,8 @@
 
                 canvas.width = targetWidth;
                 canvas.height = targetHeight;
+
+                statusText.innerText = `Výstupné rozlíšenie: ${targetWidth}×${targetHeight}. Spracovávam...`;
 
                 // 2. Príprava MediaRecorder
                 const stream = canvas.captureStream(fps);
@@ -338,7 +373,7 @@
 
                     const t0 = performance.now();
 
-                    statusText.innerText = `Spracovávam: ${i + 1} / ${files.length}`;
+                    statusText.innerText = `Spracovávam: ${i + 1} / ${files.length} (výstup ${targetWidth}×${targetHeight})`;
                     progressBar.style.width = `${((i + 1) / files.length) * 100}%`;
 
                     // Načítať a vykresliť; poškodenú/nečitateľnú fotku len preskočíme
@@ -404,6 +439,7 @@
             } finally {
                 // Odomknutie UI
                 cancelRequested = false;
+                isProcessing = false;
                 startBtn.disabled = false;
                 startBtn.style.display = 'block';
                 cancelBtn.style.display = 'none';

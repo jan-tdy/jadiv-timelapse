@@ -16,7 +16,8 @@
       "subdir": ".",
       "entrypoint": "jadiv-timelapse_plus.py",
       "run": "python3 jadiv-timelapse_plus.py",
-      "update_method": "sync",
+      "requirements": "requirements.txt",
+      "update_method": "release",
       "maintained": true
     }
   ]

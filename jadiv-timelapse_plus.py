@@ -1,12 +1,19 @@
 import sys
 import os
 import glob
+import re
 import cv2
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QLineEdit, QPushButton, QComboBox, 
+from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+                             QLabel, QLineEdit, QPushButton, QComboBox,
                              QSpinBox, QProgressBar, QFileDialog, QMessageBox)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QIcon
+
+
+def natural_sort_key(path):
+    """Rozdelí cestu na text/čísla, aby sa fotky triedili číselne (napr. 2 pred 10), nie čisto abecedne."""
+    return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', path)]
+
 
 class VideoWorker(QThread):
     """
@@ -31,12 +38,13 @@ class VideoWorker(QThread):
         try:
             # Hľadáme aj veľké JPG z Nikonu
             extensions = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
-            images = []
+            images = set()
             for ext in extensions:
-                images.extend(glob.glob(glob.escape(self.input_folder) + ext))
-            
-            # Zoradenie podľa abecedy/čísel
-            images = sorted(images)
+                images.update(glob.glob(glob.escape(self.input_folder) + ext))
+
+            # Zoradenie podľa čísel v názve (napr. 2 pred 10), nie čisto abecedne;
+            # set() vyššie zároveň odstráni duplicity (na Windows/macOS by "*.jpg" a "*.JPG" inak našli tie isté súbory dvakrát)
+            images = sorted(images, key=natural_sort_key)
 
             if not images:
                 self.finished.emit(False, "Chyba: Nenašli sa žiadne obrázky v danom priečinku.")
@@ -54,13 +62,26 @@ class VideoWorker(QThread):
             # Výpočet nového rozlíšenia
             target_width = width
             target_height = height
-            
+
+            # Fotky na výšku (portrét): "Full HD"/"4K" udávajú dlhšiu stranu, preto sa
+            # pri portréte aplikujú na výšku, nie na šírku (inak by vyšlo napr. 1920x3413
+            # namiesto rozumného zvislého videa).
+            is_portrait = height > width
+
             if "Full HD" in self.resolution_choice:
-                target_width = 1920
-                target_height = int((1920 / width) * height)
+                if is_portrait:
+                    target_height = 1920
+                    target_width = int((1920 / height) * width)
+                else:
+                    target_width = 1920
+                    target_height = int((1920 / width) * height)
             elif "4K" in self.resolution_choice:
-                target_width = 3840
-                target_height = int((3840 / width) * height)
+                if is_portrait:
+                    target_height = 3840
+                    target_width = int((3840 / height) * width)
+                else:
+                    target_width = 3840
+                    target_height = int((3840 / width) * height)
             elif "720p" in self.resolution_choice:
                 target_height = 720
                 target_width = int((720 / height) * width)
@@ -393,6 +414,19 @@ class TimelapseApp(QWidget):
                 self.start_processing()
         else:
             super().keyPressEvent(event)
+
+    def closeEvent(self, event):
+        # Zabránime zatvoreniu okna, kým beží spracovanie na pozadí — inak by sa
+        # vlákno tvrdo ukončilo uprostred zápisu videa (poškodený súbor / pád Qt).
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            QMessageBox.warning(
+                self, "Spracovanie beží",
+                "Video sa ešte vytvára. Najprv spracovanie zruš tlačidlom \"Zrušiť\", "
+                "potom môžeš okno zavrieť."
+            )
+            event.ignore()
+        else:
+            event.accept()
 
 
 if __name__ == "__main__":
