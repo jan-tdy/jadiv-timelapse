@@ -1,5 +1,5 @@
 # Jadiv-Timelapse
-
+**If you found this useful, please give this repo a star!** **Also check out my other repos!**
 Jednoduchý nástroj na vytvorenie timelapse videa zo sekvencie fotiek (napr. z fotoaparátu na statíve alebo z kamery). Vyberieš priečinok s fotkami, nastavíš snímkovú frekvenciu a cieľové rozlíšenie a nástroj z nich poskladá výsledné video.
 
 Projekt obsahuje tri nezávislé varianty s rovnakou funkcionalitou — vyber si podľa toho, čo ti vyhovuje:
