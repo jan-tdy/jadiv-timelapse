@@ -3,17 +3,19 @@ import os
 import glob
 import re
 import json
+import subprocess
 import urllib.request
 import urllib.error
 import webbrowser
 import cv2
+import imageio_ffmpeg
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QComboBox,
                              QSpinBox, QProgressBar, QFileDialog, QMessageBox)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QIcon
 
-APP_VERSION = "1.4"
+APP_VERSION = "1.5"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -27,6 +29,58 @@ def _version_tuple(version):
     """Prevedie napr. 'v1.10' na (1, 10), aby sa dali verzie porovnávať číselne, nie ako text."""
     parts = re.findall(r'\d+', version)
     return tuple(int(p) for p in parts) if parts else (0,)
+
+
+class FfmpegVideoWriter:
+    """
+    Zapisuje video cez FFmpeg (statický binárny súbor z balíčka imageio-ffmpeg) s kodekom H.264.
+    OpenCV vo svojom pip balíčku H.264 kódovať nevie (iba MPEG-4 "mp4v"), ktorého výstup
+    neprehrajú/neprijmú mobilné aplikácie ani napr. Instagram - preto sa na samotné kódovanie
+    videa namiesto cv2.VideoWriter používa FFmpeg, ktorému sa snímky posielajú cez rúru (pipe).
+    """
+
+    def __init__(self, output_file, fps, size):
+        width, height = size
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        cmd = [
+            ffmpeg_exe, "-y",
+            "-loglevel", "error",
+            "-f", "rawvideo", "-vcodec", "rawvideo",
+            "-pix_fmt", "bgr24",
+            "-s", f"{width}x{height}",
+            "-r", str(fps),
+            "-i", "-",
+            "-an",
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            output_file,
+        ]
+        self._process = subprocess.Popen(
+            cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
+        )
+
+    def write(self, frame):
+        self._process.stdin.write(frame.tobytes())
+
+    def release(self):
+        try:
+            self._process.stdin.close()
+        except OSError:
+            pass
+        self.error_output = self._process.stderr.read().decode("utf-8", errors="replace")
+        self._process.wait()
+
+    def terminate(self):
+        self._process.terminate()
+        try:
+            self._process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._process.kill()
+
+    @property
+    def returncode(self):
+        return self._process.returncode
 
 
 class UpdateChecker(QThread):
@@ -133,16 +187,15 @@ class VideoWorker(QThread):
             target_width = target_width - (target_width % 2)
             target_height = target_height - (target_height % 2)
 
-            # Inicializácia VideoWriter
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            video = cv2.VideoWriter(self.output_file, fourcc, self.fps, (target_width, target_height))
-
-            if not video.isOpened():
-                self.finished.emit(False, "Chyba: Video sa nepodarilo vytvoriť. Skontroluj, či cieľový priečinok "
-                                           "existuje a či máš práva na zápis.")
+            # Inicializácia zapisovača videa (FFmpeg / H.264)
+            try:
+                video = FfmpegVideoWriter(self.output_file, self.fps, (target_width, target_height))
+            except OSError as e:
+                self.finished.emit(False, f"Chyba: Nepodarilo sa spustiť FFmpeg pre vytvorenie videa.\n{e}")
                 return
 
             was_cancelled = False
+            write_failed = False
             try:
                 total_images = len(images)
                 for i, image_path in enumerate(images):
@@ -158,14 +211,21 @@ class VideoWorker(QThread):
                     if img.shape[:2] != (target_height, target_width):
                         img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
 
-                    video.write(img)
+                    try:
+                        video.write(img)
+                    except (BrokenPipeError, OSError):
+                        write_failed = True
+                        break
 
                     # Aktualizácia progress baru a textu
                     progress_percent = int(((i + 1) / total_images) * 100)
                     status_text = f"Spracované: {i + 1} / {total_images}"
                     self.progress_update.emit(progress_percent, status_text)
             finally:
-                video.release()
+                if was_cancelled:
+                    video.terminate()
+                else:
+                    video.release()
 
             if was_cancelled:
                 if os.path.exists(self.output_file):
@@ -174,6 +234,10 @@ class VideoWorker(QThread):
                     except OSError:
                         pass
                 self.cancelled.emit("Spracovanie bolo zrušené.")
+                return
+
+            if write_failed or video.returncode != 0:
+                self.finished.emit(False, f"Chyba: FFmpeg zlyhal pri vytváraní videa.\n{video.error_output}")
                 return
 
             # Úspešné dokončenie

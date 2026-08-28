@@ -1,0 +1,17 @@
+name: Require version bump
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch base branch
+        run: git fetch origin "${{ github.base_ref }}":"refs/remotes/origin/${{ github.base_ref }}"
+
+      - name: Check version was bumped
+        run: python3 .github/scripts/check_version_bump.py "${{ github.base_ref }}"
