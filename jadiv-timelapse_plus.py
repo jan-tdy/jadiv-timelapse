@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QIcon
 
-APP_VERSION = "1.3"
+APP_VERSION = "1.4"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
