@@ -2,6 +2,10 @@ import sys
 import os
 import glob
 import re
+import json
+import urllib.request
+import urllib.error
+import webbrowser
 import cv2
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QComboBox,
@@ -9,10 +13,43 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QFont, QIcon
 
+APP_VERSION = "1.3"
+GITHUB_REPO = "jan-tdy/jadiv-timelapse"
+GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
 
 def natural_sort_key(path):
     """Rozdelí cestu na text/čísla, aby sa fotky triedili číselne (napr. 2 pred 10), nie čisto abecedne."""
     return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', path)]
+
+
+def _version_tuple(version):
+    """Prevedie napr. 'v1.10' na (1, 10), aby sa dali verzie porovnávať číselne, nie ako text."""
+    parts = re.findall(r'\d+', version)
+    return tuple(int(p) for p in parts) if parts else (0,)
+
+
+class UpdateChecker(QThread):
+    """Na pozadí (aby nezamrzlo UI) skontroluje na GitHube najnovšie vydanie a porovná ho s aktuálnou verziou."""
+    update_available = pyqtSignal(str, str)
+
+    def run(self):
+        try:
+            request = urllib.request.Request(
+                GITHUB_LATEST_RELEASE_API,
+                headers={"Accept": "application/vnd.github+json"}
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                data = json.loads(response.read().decode("utf-8"))
+
+            latest_tag = data.get("tag_name", "")
+            release_url = data.get("html_url", f"https://github.com/{GITHUB_REPO}/releases/latest")
+
+            if latest_tag and _version_tuple(latest_tag) > _version_tuple(APP_VERSION):
+                self.update_available.emit(latest_tag, release_url)
+        except (urllib.error.URLError, ValueError, OSError):
+            # Bez internetu, GitHub nedostupný alebo limit API - kontrola sa jednoducho preskočí
+            pass
 
 
 class VideoWorker(QThread):
@@ -150,7 +187,8 @@ class TimelapseApp(QWidget):
     def __init__(self):
         super().__init__()
         self.initUI()
-        
+        self.check_for_updates()
+
     def initUI(self):
         self.setWindowTitle("Jadiv-Timelapse Plus version(by JapySoft TDY)")
         self.resize(650, 400)
@@ -323,7 +361,33 @@ class TimelapseApp(QWidget):
 
         main_layout.addLayout(btn_layout)
 
+        # Verzia aplikácie v pravom dolnom rohu
+        version_label = QLabel(f"v{APP_VERSION}")
+        version_label.setStyleSheet("color: #666666; font-size: 8pt;")
+        version_label.setAlignment(Qt.AlignRight)
+        main_layout.addWidget(version_label)
+
         self.setLayout(main_layout)
+
+    def check_for_updates(self):
+        # Kontrola beží na pozadí, aby neblokovala spustenie okna
+        self.update_checker = UpdateChecker()
+        self.update_checker.update_available.connect(self.show_update_dialog)
+        self.update_checker.start()
+
+    def show_update_dialog(self, latest_version, release_url):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Dostupná nová verzia")
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setText(
+            f"Je dostupná nová verzia {latest_version} (aktuálna verzia: v{APP_VERSION})."
+        )
+        msg_box.setInformativeText("Chceš otvoriť stránku so stiahnutím?")
+        open_btn = msg_box.addButton("Otvoriť stránku", QMessageBox.AcceptRole)
+        msg_box.addButton("Neskôr", QMessageBox.RejectRole)
+        msg_box.exec_()
+        if msg_box.clickedButton() == open_btn:
+            webbrowser.open(release_url)
 
     def browse_input(self):
         folder = QFileDialog.getExistingDirectory(self, "Vyber priečinok s obrázkami")
