@@ -3,6 +3,9 @@
 
 A simple tool for creating a timelapse video from a sequence of photos (e.g. from a camera on a tripod). Pick a folder of photos, set the frame rate and target resolution, and the tool assembles them into the resulting video.
 
+<img width="675" height="497" alt="image" src="https://github.com/user-attachments/assets/e683753f-8696-4c76-9cc5-647991cb0ce2" />
+
+
 The project contains three independent variants with the same functionality — pick whichever suits you:
 
 | File | Description | Requires | Status |
