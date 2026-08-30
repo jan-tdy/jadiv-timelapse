@@ -1,0 +1,26 @@
+name: Lint
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install lint tools
+        run: pip install pyflakes
+
+      - name: Compile check (catches syntax errors)
+        run: python -m py_compile jadiv-timelapse.py jadiv-timelapse_plus.py
+
+      - name: Pyflakes (static analysis)
+        run: python -m pyflakes jadiv-timelapse.py jadiv-timelapse_plus.py

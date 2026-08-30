@@ -2,3 +2,20 @@ __pycache__/
 *.pyc
 *.mp4
 *.webm
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+Desktop.ini
