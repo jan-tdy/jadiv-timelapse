@@ -8,14 +8,14 @@ import urllib.request
 import urllib.error
 import webbrowser
 import cv2
+import numpy as np
 import imageio_ffmpeg
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QComboBox,
                              QSpinBox, QProgressBar, QFileDialog, QMessageBox)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
-from PyQt5.QtGui import QFont, QIcon
 
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -23,6 +23,18 @@ GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/release
 def natural_sort_key(path):
     """Rozdelí cestu na text/čísla, aby sa fotky triedili číselne (napr. 2 pred 10), nie čisto abecedne."""
     return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', path)]
+
+
+def imread_unicode(path):
+    """cv2.imread() zlyháva (vráti None) na Windows, ak cesta obsahuje diakritiku;
+    workaround cez np.fromfile + cv2.imdecode, ktoré cestu otvárajú unicode-bezpečne."""
+    try:
+        data = np.fromfile(path, dtype=np.uint8)
+    except OSError:
+        return None
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_COLOR)
 
 
 def _version_tuple(version):
@@ -142,7 +154,7 @@ class VideoWorker(QThread):
                 return
 
             # Zistenie rozmerov videa podľa prvého obrázka
-            first_frame = cv2.imread(images[0])
+            first_frame = imread_unicode(images[0])
             if first_frame is None:
                 self.finished.emit(False, "Chyba: Prvý obrázok je poškodený a nedá sa načítať.")
                 return
@@ -203,7 +215,7 @@ class VideoWorker(QThread):
                         was_cancelled = True
                         break
 
-                    img = cv2.imread(image_path)
+                    img = imread_unicode(image_path)
                     if img is None:
                         continue
 

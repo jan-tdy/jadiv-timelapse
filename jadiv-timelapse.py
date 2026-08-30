@@ -1,15 +1,30 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import cv2
+import numpy as np
 import glob
 import re
 import threading
 import os
+import tempfile
+import shutil
 
 
 def natural_sort_key(path):
     """Rozdelí cestu na text/čísla, aby sa fotky triedili číselne (napr. 2 pred 10), nie čisto abecedne."""
     return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', path)]
+
+
+def imread_unicode(path):
+    """cv2.imread() zlyháva (vráti None) na Windows, ak cesta obsahuje diakritiku;
+    workaround cez np.fromfile + cv2.imdecode, ktoré cestu otvárajú unicode-bezpečne."""
+    try:
+        data = np.fromfile(path, dtype=np.uint8)
+    except OSError:
+        return None
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_COLOR)
 
 
 class TimelapseApp:
@@ -139,6 +154,7 @@ class TimelapseApp:
         self.status_label.config(text="Rušenie...", foreground="orange")
 
     def process_video(self, input_folder, output_file, fps, resolution_choice):
+        tmp_output_path = None
         try:
             # Hľadáme aj veľké JPG z Nikonu
             extensions = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
@@ -155,7 +171,7 @@ class TimelapseApp:
                 return
 
             # Zistenie rozmerov videa podľa prvého obrázka
-            first_frame = cv2.imread(images[0])
+            first_frame = imread_unicode(images[0])
             if first_frame is None:
                 self.root.after(0, self.finish_processing, "Chyba: Prvý obrázok je poškodený.", False)
                 return
@@ -187,9 +203,16 @@ class TimelapseApp:
             target_width = target_width - (target_width % 2)
             target_height = target_height - (target_height % 2)
 
+            # cv2.VideoWriter zlyháva na Windows, ak výstupná cesta obsahuje diakritiku,
+            # preto sa video zapisuje do dočasného súboru v systémovom temp priečinku
+            # a na konci sa hotový súbor presunie na požadované miesto (presun/premenovanie
+            # súborov cez os/shutil je na rozdiel od OpenCV unicode-bezpečný).
+            tmp_fd, tmp_output_path = tempfile.mkstemp(suffix=os.path.splitext(output_file)[1] or ".mp4")
+            os.close(tmp_fd)
+
             # Inicializácia VideoWriter
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            video = cv2.VideoWriter(output_file, fourcc, fps, (target_width, target_height))
+            video = cv2.VideoWriter(tmp_output_path, fourcc, fps, (target_width, target_height))
 
             if not video.isOpened():
                 self.root.after(0, self.finish_processing,
@@ -205,7 +228,7 @@ class TimelapseApp:
                         cancelled = True
                         break
 
-                    img = cv2.imread(image_path)
+                    img = imread_unicode(image_path)
                     if img is None:
                         continue
 
@@ -222,19 +245,24 @@ class TimelapseApp:
                 video.release()
 
             if cancelled:
-                if os.path.exists(output_file):
-                    try:
-                        os.remove(output_file)
-                    except OSError:
-                        pass
                 self.root.after(0, self.finish_processing, "Spracovanie bolo zrušené.", None)
                 return
+
+            # Presun hotového videa z dočasného súboru na požadované miesto
+            shutil.move(tmp_output_path, output_file)
+            tmp_output_path = None
 
             # Úspešné dokončenie
             self.root.after(0, self.finish_processing, "Video bolo úspešne vytvorené!", True)
 
         except Exception as e:
             self.root.after(0, self.finish_processing, f"Nastala chyba:\n{str(e)}", False)
+        finally:
+            if tmp_output_path and os.path.exists(tmp_output_path):
+                try:
+                    os.remove(tmp_output_path)
+                except OSError:
+                    pass
 
     def update_progress(self, val, text):
         self.progress_var.set(val)
