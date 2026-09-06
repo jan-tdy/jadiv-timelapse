@@ -1,6 +1,8 @@
 # Jadiv-Timelapse
 **If you found this useful, please give this repo a star!** **Also check out my other repos!**
 
+You can take a look at my issue and pr queue if you are wondering why is something stale for days [here](https://github.com/issues/assigned?q=is%3Aissue+or+is%3Apr+state%3Aopen+archived%3Afalse+user%3Ajan-tdy+sort%3Acreated-asc)
+
 A simple tool for creating a timelapse video from a sequence of photos (e.g. from a camera on a tripod). Pick a folder of photos, set the frame rate and target resolution, and the tool assembles them into the resulting video.
 
 <img width="675" height="497" alt="image" src="https://github.com/user-attachments/assets/e683753f-8696-4c76-9cc5-647991cb0ce2" />
