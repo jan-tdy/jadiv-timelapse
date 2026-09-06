@@ -244,7 +244,7 @@
     <div id="versionBadge"></div>
 
     <script>
-        const APP_VERSION = '1.6.1';
+        const APP_VERSION = '1.7.0';
         const GITHUB_REPO = 'jan-tdy/jadiv-timelapse';
 
         function versionTuple(version) {
@@ -421,6 +421,12 @@
 
                 canvas.width = targetWidth;
                 canvas.height = targetHeight;
+
+                // Vykresliť prvú snímku na canvas ešte pred spustením captureStream/nahrávania,
+                // aby stream nezachytil prázdny (čierny) canvas skôr, než sa stihne vykresliť prvý obrázok.
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(firstImg, 0, 0, targetWidth, targetHeight);
 
                 statusText.innerText = `Výstupné rozlíšenie: ${targetWidth}×${targetHeight}. Spracovávam...`;
 
