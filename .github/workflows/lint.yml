@@ -20,7 +20,7 @@ jobs:
         run: pip install pyflakes
 
       - name: Compile check (catches syntax errors)
-        run: python -m py_compile jadiv-timelapse.py jadiv-timelapse_plus.py
+        run: python -m py_compile jadiv-timelapse.py jadiv-timelapse_plus.py timelapse_core.py
 
       - name: Pyflakes (static analysis)
-        run: python -m pyflakes jadiv-timelapse.py jadiv-timelapse_plus.py
+        run: python -m pyflakes jadiv-timelapse.py jadiv-timelapse_plus.py timelapse_core.py

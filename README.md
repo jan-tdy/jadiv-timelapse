@@ -77,6 +77,19 @@ Processing can be interrupted at any time with the **Zrušiť** (Cancel) button.
 - Corrupted or unreadable photos are skipped during processing and are not included in the video.
 - MP4/WebM codecs require an even width and height for the video — the tool handles this automatically.
 
+## Testing
+
+The natural-sort and resolution/aspect-ratio math shared by all three variants lives in a single testable place per variant: `timelapse_core.py` (used by both `.py` GUIs) and `docs/resolution.js` (used by the web version).
+
+```bash
+# Python (both desktop variants)
+pip install -r requirements-dev.txt
+pytest
+
+# Web version
+node docs/test/resolution.test.js
+```
+
 ## Releases
 
 The project publishes versions via [GitHub Releases](https://github.com/jan-tdy/jadiv-timelapse/releases) — the release tag is also the version shown to users (e.g. in JapySoft Code Master, which downloads the app based on the latest release, not the latest commit on the branch).

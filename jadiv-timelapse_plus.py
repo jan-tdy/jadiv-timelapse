@@ -15,14 +15,11 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QSpinBox, QProgressBar, QFileDialog, QMessageBox)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
-APP_VERSION = "1.7.0"
+from timelapse_core import natural_sort_key, compute_target_resolution
+
+APP_VERSION = "1.8.0"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-
-
-def natural_sort_key(path):
-    """Rozdelí cestu na text/čísla, aby sa fotky triedili číselne (napr. 2 pred 10), nie čisto abecedne."""
-    return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', path)]
 
 
 def imread_unicode(path):
@@ -162,42 +159,8 @@ class VideoWorker(QThread):
             # shape[:2] funguje pre farebné aj čiernobiele obrázky
             height, width = first_frame.shape[:2]
 
-            # Výpočet nového rozlíšenia
-            target_width = width
-            target_height = height
-
-            # Fotky na výšku (portrét): "Full HD"/"4K" udávajú dlhšiu stranu, preto sa
-            # pri portréte aplikujú na výšku, nie na šírku (inak by vyšlo napr. 1920x3413
-            # namiesto rozumného zvislého videa).
-            is_portrait = height > width
-
-            if "Full HD" in self.resolution_choice:
-                if is_portrait:
-                    target_height = 1920
-                    target_width = int((1920 / height) * width)
-                else:
-                    target_width = 1920
-                    target_height = int((1920 / width) * height)
-            elif "4K" in self.resolution_choice:
-                if is_portrait:
-                    target_height = 3840
-                    target_width = int((3840 / height) * width)
-                else:
-                    target_width = 3840
-                    target_height = int((3840 / width) * height)
-            elif "720p" in self.resolution_choice:
-                target_height = 720
-                target_width = int((720 / height) * width)
-            elif "480p" in self.resolution_choice:
-                target_height = 480
-                target_width = int((480 / height) * width)
-            elif "240p" in self.resolution_choice:
-                target_height = 240
-                target_width = int((240 / height) * width)
-                
-            # Kodeky MP4 vyžadujú párne čísla
-            target_width = target_width - (target_width % 2)
-            target_height = target_height - (target_height % 2)
+            # Výpočet nového rozlíšenia (so zachovaním pomeru strán, párne čísla pre kodeky)
+            target_width, target_height = compute_target_resolution(width, height, self.resolution_choice)
 
             # Inicializácia zapisovača videa (FFmpeg / H.264)
             try:
