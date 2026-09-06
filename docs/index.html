@@ -243,8 +243,9 @@
 
     <div id="versionBadge"></div>
 
+    <script src="resolution.js"></script>
     <script>
-        const APP_VERSION = '1.7.0';
+        const APP_VERSION = '1.8.0';
         const GITHUB_REPO = 'jan-tdy/jadiv-timelapse';
 
         function versionTuple(version) {
@@ -394,30 +395,9 @@
                 if (!firstImg) {
                     throw new Error('Žiadnu z vybraných fotiek sa nepodarilo načítať.');
                 }
-                const isPortrait = firstImg.height > firstImg.width;
-                let targetWidth, targetHeight;
-
-                if (resolutionLabel.includes('4K') || resolutionLabel.includes('Full HD')) {
-                    // "4K"/"Full HD" udávajú dlhšiu (vodorovnú) stranu videa. Pri fotke na výšku
-                    // (portrét) sa preto aplikujú na výšku, nie na šírku — inak by vyšlo
-                    // absurdne vysoké video namiesto rozumného zvislého formátu.
-                    if (isPortrait) {
-                        targetHeight = resolutionValue;
-                        targetWidth = Math.round((resolutionValue / firstImg.height) * firstImg.width);
-                    } else {
-                        targetWidth = resolutionValue;
-                        targetHeight = Math.round((resolutionValue / firstImg.width) * firstImg.height);
-                    }
-                } else {
-                    // "720p"/"480p"/"240p" udávajú počet riadkov (výšku) a platí to bez ohľadu
-                    // na orientáciu fotky.
-                    targetHeight = resolutionValue;
-                    targetWidth = Math.round((resolutionValue / firstImg.height) * firstImg.width);
-                }
-
-                // Zabezpečenie párnych čísel (vyžadujú to video kodeky)
-                targetWidth -= targetWidth % 2;
-                targetHeight -= targetHeight % 2;
+                const { width: targetWidth, height: targetHeight } = computeTargetResolution(
+                    firstImg.width, firstImg.height, resolutionLabel, resolutionValue
+                );
 
                 canvas.width = targetWidth;
                 canvas.height = targetHeight;

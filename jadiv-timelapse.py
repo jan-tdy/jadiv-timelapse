@@ -3,16 +3,12 @@ from tkinter import ttk, filedialog, messagebox
 import cv2
 import numpy as np
 import glob
-import re
 import threading
 import os
 import tempfile
 import shutil
 
-
-def natural_sort_key(path):
-    """Rozdelí cestu na text/čísla, aby sa fotky triedili číselne (napr. 2 pred 10), nie čisto abecedne."""
-    return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', path)]
+from timelapse_core import natural_sort_key, compute_target_resolution
 
 
 def imread_unicode(path):
@@ -179,29 +175,8 @@ class TimelapseApp:
             # shape[:2] funguje pre farebné aj čiernobiele obrázky
             height, width = first_frame.shape[:2]
 
-            # Výpočet nového rozlíšenia podľa výberu (so zachovaním pomeru strán)
-            target_width = width
-            target_height = height
-            
-            if "Full HD" in resolution_choice:
-                target_width = 1920
-                target_height = int((1920 / width) * height)
-            elif "4K" in resolution_choice:
-                target_width = 3840
-                target_height = int((3840 / width) * height)
-            elif "720p" in resolution_choice:
-                target_height = 720
-                target_width = int((720 / height) * width)
-            elif "480p" in resolution_choice:
-                target_height = 480
-                target_width = int((480 / height) * width)
-            elif "240p" in resolution_choice:
-                target_height = 240
-                target_width = int((240 / height) * width)
-                
-            # Kodeky MP4 vyžadujú, aby šírka aj výška boli párne čísla, inak zlyhajú
-            target_width = target_width - (target_width % 2)
-            target_height = target_height - (target_height % 2)
+            # Výpočet nového rozlíšenia (so zachovaním pomeru strán, párne čísla pre kodeky)
+            target_width, target_height = compute_target_resolution(width, height, resolution_choice)
 
             # cv2.VideoWriter zlyháva na Windows, ak výstupná cesta obsahuje diakritiku,
             # preto sa video zapisuje do dočasného súboru v systémovom temp priečinku
