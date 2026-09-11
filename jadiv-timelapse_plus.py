@@ -17,7 +17,7 @@ from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
 from timelapse_core import natural_sort_key, compute_target_resolution
 
-APP_VERSION = "1.10.0"
+APP_VERSION = "1.10.1"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -26,7 +26,16 @@ SKIP_WATERMARK = "--nomark" in sys.argv
 
 OUTRO_DURATION_SECONDS = 4
 OUTRO_LINE1 = "Made by Jadiv-Timelapse"
-OUTRO_LINE2 = f"If you like this, star us on GitHub: github.com/{GITHUB_REPO}"
+OUTRO_LINE2 = "Simple timelapse creation - no command-line needed"
+OUTRO_LINE3 = f"If you like this, star us on GitHub: github.com/{GITHUB_REPO}"
+
+# (text, font_scale multiplier, thickness multiplier, color) - font_scale/thickness sa škálujú
+# podľa cieľového rozlíšenia (referencia 720p); veľkosti sú 3x pôvodného watermarku
+OUTRO_LINES = (
+    (OUTRO_LINE1, 3.3, 6, (255, 255, 255)),
+    (OUTRO_LINE2, 1.5, 3, (220, 220, 220)),
+    (OUTRO_LINE3, 1.2, 2, (170, 170, 170)),
+)
 
 
 def build_outro_frame(width, height):
@@ -34,14 +43,32 @@ def build_outro_frame(width, height):
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     scale = height / 720
     font = cv2.FONT_HERSHEY_SIMPLEX
+    gap = int(round(20 * scale))
+    max_text_width = int(width * 0.92)
 
-    def draw_centered(text, y, font_scale, thickness, color):
-        (text_w, _), _ = cv2.getTextSize(text, font, font_scale, thickness)
+    rendered = []
+    for text, font_scale_mult, thickness_mult, color in OUTRO_LINES:
+        font_scale = max(font_scale_mult * scale, font_scale_mult * 0.25)
+        thickness = max(int(round(thickness_mult * scale)), 1)
+        (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+
+        # Pri nízkych rozlíšeniach (napr. 240p) sa dlhší riadok nemusí zmestiť na šírku -
+        # v takom prípade písmo dodatočne zmenšíme, aby sa text nezobrazoval orezaný
+        if text_w > max_text_width:
+            shrink = max_text_width / text_w
+            font_scale = max(font_scale * shrink, 0.3)
+            thickness = max(int(round(thickness * shrink)), 1)
+            (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
+
+        rendered.append((text, font_scale, thickness, color, text_w, text_h + baseline))
+
+    total_height = sum(r[5] for r in rendered) + gap * (len(rendered) - 1)
+    y = int(height / 2 - total_height / 2)
+    for text, font_scale, thickness, color, text_w, line_height in rendered:
+        y += line_height
         x = max((width - text_w) // 2, 0)
         cv2.putText(frame, text, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
-
-    draw_centered(OUTRO_LINE1, int(height / 2 - 10 * scale), max(1.1 * scale, 0.4), max(int(round(2 * scale)), 1), (255, 255, 255))
-    draw_centered(OUTRO_LINE2, int(height / 2 + 30 * scale), max(0.6 * scale, 0.35), max(int(round(1 * scale)), 1), (170, 170, 170))
+        y += gap
     return frame
 
 

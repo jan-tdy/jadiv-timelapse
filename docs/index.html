@@ -245,12 +245,21 @@
 
     <script src="resolution.js"></script>
     <script>
-        const APP_VERSION = '1.10.0';
+        const APP_VERSION = '1.10.1';
         const GITHUB_REPO = 'jan-tdy/jadiv-timelapse';
 
         const OUTRO_DURATION_SECONDS = 4;
         const OUTRO_LINE1 = 'Made by Jadiv-Timelapse';
-        const OUTRO_LINE2 = `If you like this, star us on GitHub: github.com/${GITHUB_REPO}`;
+        const OUTRO_LINE2 = 'Simple timelapse creation - no command-line needed';
+        const OUTRO_LINE3 = `If you like this, star us on GitHub: github.com/${GITHUB_REPO}`;
+
+        // (text, veľkosť písma v px pri referenčnej výške 720p, hrúbka, farba) -
+        // veľkosti sú 3x pôvodného watermarku
+        const OUTRO_LINES = [
+            { text: OUTRO_LINE1, px: 84, weight: 'bold', color: '#ffffff' },
+            { text: OUTRO_LINE2, px: 45, weight: 'normal', color: '#dcdcdc' },
+            { text: OUTRO_LINE3, px: 36, weight: 'normal', color: '#aaaaaa' },
+        ];
 
         // Vykreslí čiernu snímku s watermarkom na konci videa (propagácia projektu)
         function drawOutroFrame(ctx, width, height) {
@@ -258,16 +267,33 @@
             ctx.fillRect(0, 0, width, height);
 
             const scale = height / 720;
+            const maxTextWidth = width * 0.92;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
-            ctx.fillStyle = '#ffffff';
-            ctx.font = `bold ${Math.max(28 * scale, 12)}px 'Segoe UI', Arial, sans-serif`;
-            ctx.fillText(OUTRO_LINE1, width / 2, height / 2 - 16 * scale);
+            // Pre každý riadok zistíme veľkosť písma a pri nízkych rozlíšeniach (napr. 240p)
+            // ho zmenšíme, ak by sa dlhší text nezmestil na šírku plátna
+            const lines = OUTRO_LINES.map(line => {
+                let fontPx = Math.max(line.px * scale, line.px * 0.3);
+                ctx.font = `${line.weight} ${fontPx}px 'Segoe UI', Arial, sans-serif`;
+                const textWidth = ctx.measureText(line.text).width;
+                if (textWidth > maxTextWidth) {
+                    fontPx = Math.max(fontPx * (maxTextWidth / textWidth), line.px * 0.15);
+                }
+                return { ...line, fontPx, lineHeight: fontPx * 1.2 };
+            });
 
-            ctx.fillStyle = '#aaaaaa';
-            ctx.font = `${Math.max(16 * scale, 10)}px 'Segoe UI', Arial, sans-serif`;
-            ctx.fillText(OUTRO_LINE2, width / 2, height / 2 + 20 * scale);
+            const gap = 18 * scale;
+            const totalHeight = lines.reduce((sum, l) => sum + l.lineHeight, 0) + gap * (lines.length - 1);
+
+            let y = height / 2 - totalHeight / 2;
+            lines.forEach(line => {
+                y += line.lineHeight / 2;
+                ctx.fillStyle = line.color;
+                ctx.font = `${line.weight} ${line.fontPx}px 'Segoe UI', Arial, sans-serif`;
+                ctx.fillText(line.text, width / 2, y);
+                y += line.lineHeight / 2 + gap;
+            });
         }
 
         function versionTuple(version) {
