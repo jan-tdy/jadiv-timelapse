@@ -26,6 +26,7 @@ The project contains three independent variants with the same functionality — 
 - Shows processing progress and lets you cancel processing at any time
 - Processing runs in the background (the GUI/page never freezes)
 - On startup, the app (desktop `_plus` version and web version) checks GitHub for a newer release and shows a notification if one is available; the current version is shown in the corner of the window/page
+- A short "Made by Jadiv-Timelapse" watermark with a link to this repo is appended to the last 4 seconds of the generated video; run `jadiv-timelapse_plus.py` with `--nomark` to skip it
 
 ## Requirements and installation (desktop versions)
 

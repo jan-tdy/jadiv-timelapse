@@ -17,9 +17,32 @@ from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
 from timelapse_core import natural_sort_key, compute_target_resolution
 
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.10.0"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+# --nomark vypne pridávanie záverečného watermarku do videa
+SKIP_WATERMARK = "--nomark" in sys.argv
+
+OUTRO_DURATION_SECONDS = 4
+OUTRO_LINE1 = "Made by Jadiv-Timelapse"
+OUTRO_LINE2 = f"If you like this, star us on GitHub: github.com/{GITHUB_REPO}"
+
+
+def build_outro_frame(width, height):
+    """Čierna snímka s watermarkom, ktorá sa pripojí na koniec videa (propagácia projektu)."""
+    frame = np.zeros((height, width, 3), dtype=np.uint8)
+    scale = height / 720
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    def draw_centered(text, y, font_scale, thickness, color):
+        (text_w, _), _ = cv2.getTextSize(text, font, font_scale, thickness)
+        x = max((width - text_w) // 2, 0)
+        cv2.putText(frame, text, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
+
+    draw_centered(OUTRO_LINE1, int(height / 2 - 10 * scale), max(1.1 * scale, 0.4), max(int(round(2 * scale)), 1), (255, 255, 255))
+    draw_centered(OUTRO_LINE2, int(height / 2 + 30 * scale), max(0.6 * scale, 0.35), max(int(round(1 * scale)), 1), (170, 170, 170))
+    return frame
 
 
 def imread_unicode(path):
@@ -202,6 +225,19 @@ class VideoWorker(QThread):
                     progress_percent = int(((i + 1) / total_images) * 100)
                     status_text = f"Spracované: {i + 1} / {total_images}"
                     self.progress_update.emit(progress_percent, status_text)
+
+                # Watermark na konci videa (propagácia projektu) - iba ak spracovanie
+                # prebehlo v poriadku, nie pri zrušení alebo chybe zápisu
+                if not was_cancelled and not write_failed and not SKIP_WATERMARK:
+                    self.progress_update.emit(100, "Pridávam záverečný watermark...")
+                    outro_frame = build_outro_frame(target_width, target_height)
+                    outro_frame_count = max(round(self.fps * OUTRO_DURATION_SECONDS), 1)
+                    for _ in range(outro_frame_count):
+                        try:
+                            video.write(outro_frame)
+                        except (BrokenPipeError, OSError):
+                            write_failed = True
+                            break
             finally:
                 if was_cancelled:
                     video.terminate()
@@ -539,7 +575,10 @@ class TimelapseApp(QWidget):
 
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
+    # --nomark je vlastný prepínač aplikácie, nie Qt argument - PyQt by ho inak
+    # nahlásil ako neznámu voľbu
+    qt_argv = [arg for arg in sys.argv if arg != "--nomark"]
+    app = QApplication(qt_argv)
     
     # Pre zaistenie pekného vzhľadu na rôznych systémoch
     app.setStyle("Fusion")
