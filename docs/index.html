@@ -245,8 +245,30 @@
 
     <script src="resolution.js"></script>
     <script>
-        const APP_VERSION = '1.9.0';
+        const APP_VERSION = '1.10.0';
         const GITHUB_REPO = 'jan-tdy/jadiv-timelapse';
+
+        const OUTRO_DURATION_SECONDS = 4;
+        const OUTRO_LINE1 = 'Made by Jadiv-Timelapse';
+        const OUTRO_LINE2 = `If you like this, star us on GitHub: github.com/${GITHUB_REPO}`;
+
+        // Vykreslí čiernu snímku s watermarkom na konci videa (propagácia projektu)
+        function drawOutroFrame(ctx, width, height) {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, width, height);
+
+            const scale = height / 720;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${Math.max(28 * scale, 12)}px 'Segoe UI', Arial, sans-serif`;
+            ctx.fillText(OUTRO_LINE1, width / 2, height / 2 - 16 * scale);
+
+            ctx.fillStyle = '#aaaaaa';
+            ctx.font = `${Math.max(16 * scale, 10)}px 'Segoe UI', Arial, sans-serif`;
+            ctx.fillText(OUTRO_LINE2, width / 2, height / 2 + 20 * scale);
+        }
 
         function versionTuple(version) {
             // Prevedie napr. "v1.10" na [1, 10], aby sa dali verzie porovnávať číselne, nie ako text
@@ -474,6 +496,14 @@
                     const waitTime = Math.max(0, frameDurationMs - processTime);
 
                     await sleep(waitTime);
+                }
+
+                // Watermark na konci videa (propagácia projektu) - iba ak spracovanie
+                // prebehlo v poriadku, nie pri zrušení
+                if (!wasCancelled && drawnCount > 0) {
+                    statusText.innerText = 'Pridávam záverečný watermark...';
+                    drawOutroFrame(ctx, targetWidth, targetHeight);
+                    await sleep(OUTRO_DURATION_SECONDS * 1000);
                 }
 
                 // Trochu počkáme na poslednú snímku a zastavíme
