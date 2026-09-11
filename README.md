@@ -29,7 +29,7 @@ The project contains three independent variants with the same functionality — 
 
 ## Requirements and installation (desktop versions)
 
-You need Python 3.8+ and the following libraries:
+You need Python 3.8+, a system `ffmpeg` install, and the following libraries:
 
 ```bash
 pip install -r requirements.txt
@@ -37,16 +37,26 @@ pip install -r requirements.txt
 
 > **Getting `error: externally-managed-environment`?** Recent Debian/Ubuntu/Fedora
 > ship a system Python that blocks `pip install` outside a virtual environment
-> (PEP 668). Use a venv instead of installing system-wide:
+> (PEP 668). Install into a venv instead of system-wide:
 > ```bash
 > python3 -m venv .venv
 > source .venv/bin/activate   # Windows: .venv\Scripts\activate
 > pip install -r requirements.txt
 > python3 jadiv-timelapse_plus.py   # run inside the same activated venv
 > ```
-> If you really need a system-wide install (e.g. so JapySoft Code Master, which
-> calls `pip install` directly, can find the packages), the quick workaround is
-> `pip install --break-system-packages -r requirements.txt`.
+
+`jadiv-timelapse_plus.py` shells out to `ffmpeg` for H.264 video encoding (OpenCV's own pip build can only encode MPEG-4, which mobile apps and Instagram reject), so `ffmpeg` must be on your `PATH`:
+
+```bash
+# Debian / Ubuntu
+sudo apt install ffmpeg
+# Fedora
+sudo dnf install ffmpeg
+# macOS
+brew install ffmpeg
+# Windows
+winget install ffmpeg
+```
 
 `jadiv-timelapse.py` additionally uses `tkinter`, which ships with the standard Python installation on Windows and macOS. On Linux you can install it via your package manager, e.g.:
 

@@ -3,13 +3,13 @@ import os
 import glob
 import re
 import json
+import shutil
 import subprocess
 import urllib.request
 import urllib.error
 import webbrowser
 import cv2
 import numpy as np
-import imageio_ffmpeg
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QComboBox,
                              QSpinBox, QProgressBar, QFileDialog, QMessageBox)
@@ -17,7 +17,7 @@ from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
 from timelapse_core import natural_sort_key, compute_target_resolution
 
-APP_VERSION = "1.8.1"
+APP_VERSION = "1.9.0"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -42,7 +42,7 @@ def _version_tuple(version):
 
 class FfmpegVideoWriter:
     """
-    Zapisuje video cez FFmpeg (statický binárny súbor z balíčka imageio-ffmpeg) s kodekom H.264.
+    Zapisuje video cez systémový FFmpeg s kodekom H.264.
     OpenCV vo svojom pip balíčku H.264 kódovať nevie (iba MPEG-4 "mp4v"), ktorého výstup
     neprehrajú/neprijmú mobilné aplikácie ani napr. Instagram - preto sa na samotné kódovanie
     videa namiesto cv2.VideoWriter používa FFmpeg, ktorému sa snímky posielajú cez rúru (pipe).
@@ -50,7 +50,13 @@ class FfmpegVideoWriter:
 
     def __init__(self, output_file, fps, size):
         width, height = size
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg_exe = shutil.which("ffmpeg")
+        if ffmpeg_exe is None:
+            raise FileNotFoundError(
+                "FFmpeg sa nenašiel v PATH. Nainštalujte ho (napr. 'sudo apt install ffmpeg' "
+                "na Debian/Ubuntu, 'sudo dnf install ffmpeg' na Fedora, alebo 'brew install ffmpeg' "
+                "na macOS) a skúste to znova."
+            )
         cmd = [
             ffmpeg_exe, "-y",
             "-loglevel", "error",
