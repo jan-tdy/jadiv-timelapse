@@ -17,7 +17,7 @@ from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
 from timelapse_core import natural_sort_key, compute_target_resolution
 
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.8.1"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 

@@ -35,6 +35,19 @@ You need Python 3.8+ and the following libraries:
 pip install -r requirements.txt
 ```
 
+> **Getting `error: externally-managed-environment`?** Recent Debian/Ubuntu/Fedora
+> ship a system Python that blocks `pip install` outside a virtual environment
+> (PEP 668). Use a venv instead of installing system-wide:
+> ```bash
+> python3 -m venv .venv
+> source .venv/bin/activate   # Windows: .venv\Scripts\activate
+> pip install -r requirements.txt
+> python3 jadiv-timelapse_plus.py   # run inside the same activated venv
+> ```
+> If you really need a system-wide install (e.g. so JapySoft Code Master, which
+> calls `pip install` directly, can find the packages), the quick workaround is
+> `pip install --break-system-packages -r requirements.txt`.
+
 `jadiv-timelapse.py` additionally uses `tkinter`, which ships with the standard Python installation on Windows and macOS. On Linux you can install it via your package manager, e.g.:
 
 ```bash
