@@ -1,4 +1,4 @@
-// Ľahký test bez frameworku pre docs/resolution.js - spúšťa sa cez `node docs/test/resolution.test.js`.
+// Lightweight framework-free test for docs/resolution.js - run via `node docs/test/resolution.test.js`.
 'use strict';
 
 const assert = require('assert');
@@ -27,19 +27,19 @@ function assertResolution(width, height, label, value, expected, message) {
 console.log('computeTargetResolution:');
 
 test('Full HD landscape uses the long side as width', () => {
-    assertResolution(3840, 2160, 'Full HD (Plynulé prehrávanie)', 1920, { width: 1920, height: 1080 });
+    assertResolution(3840, 2160, 'Full HD (Smooth playback)', 1920, { width: 1920, height: 1080 });
 });
 
 test('Full HD portrait uses the long side as height', () => {
-    assertResolution(2160, 3840, 'Full HD (Plynulé prehrávanie)', 1920, { width: 1080, height: 1920 });
+    assertResolution(2160, 3840, 'Full HD (Smooth playback)', 1920, { width: 1080, height: 1920 });
 });
 
 test('4K landscape uses the long side as width', () => {
-    assertResolution(1920, 1080, '4K (Vysoká kvalita)', 3840, { width: 3840, height: 2160 });
+    assertResolution(1920, 1080, '4K (High quality)', 3840, { width: 3840, height: 2160 });
 });
 
 test('4K portrait uses the long side as height', () => {
-    assertResolution(1080, 1920, '4K (Vysoká kvalita)', 3840, { width: 2160, height: 3840 });
+    assertResolution(1080, 1920, '4K (High quality)', 3840, { width: 2160, height: 3840 });
 });
 
 test('720p always targets height regardless of orientation (landscape)', () => {
@@ -51,11 +51,11 @@ test('720p always targets height regardless of orientation (portrait)', () => {
 });
 
 test('480p rounds an odd aspect ratio down to an even width', () => {
-    assertResolution(640, 427, 'SD (480p - malé)', 480, { width: 718, height: 480 });
+    assertResolution(640, 427, 'SD (480p - small)', 480, { width: 718, height: 480 });
 });
 
 test('240p works with plain landscape photos', () => {
-    assertResolution(1000, 750, 'Nízka kvalita (240p - veľmi malé)', 240, { width: 320, height: 240 });
+    assertResolution(1000, 750, 'Low quality (240p - very small)', 240, { width: 320, height: 240 });
 });
 
 test('rounds to the nearest pixel (not truncating) before enforcing even numbers', () => {

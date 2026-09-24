@@ -94,9 +94,9 @@ In both desktop versions, simply:
 1. Select the folder with the photos.
 2. Choose where and under what name the resulting video should be saved (`.mp4`).
 3. Set the FPS and target resolution.
-4. Click **VYTVORIŤ TIMELAPSE** (or press Enter).
+4. Click **CREATE TIMELAPSE** (or press Enter).
 
-Processing can be interrupted at any time with the **Zrušiť** (Cancel) button.
+Processing can be interrupted at any time with the **Cancel** button.
 
 ## Notes
 

@@ -29,20 +29,20 @@ def test_natural_sort_key_is_case_insensitive():
 @pytest.mark.parametrize(
     "width, height, resolution_choice, expected",
     [
-        # "Full HD"/"4K" udávajú dlhšiu (vodorovnú) stranu - pri landscape fotke ide o šírku.
-        (3840, 2160, "Full HD (Plynulé prehrávanie)", (1920, 1080)),
-        (1920, 1080, "4K (Vysoká kvalita)", (3840, 2160)),
-        # Pri portrétnej fotke sa dlhšia strana aplikuje na výšku, nie šírku.
-        (2160, 3840, "Full HD (Plynulé prehrávanie)", (1080, 1920)),
-        (1080, 1920, "4K (Vysoká kvalita)", (2160, 3840)),
-        # "720p"/"480p"/"240p" udávajú vždy výšku (počet riadkov), bez ohľadu na orientáciu.
+        # "Full HD"/"4K" denote the longer (horizontal) side - for a landscape photo that's the width.
+        (3840, 2160, "Full HD (Smooth playback)", (1920, 1080)),
+        (1920, 1080, "4K (High quality)", (3840, 2160)),
+        # For a portrait photo, the longer side is applied to the height, not the width.
+        (2160, 3840, "Full HD (Smooth playback)", (1080, 1920)),
+        (1080, 1920, "4K (High quality)", (2160, 3840)),
+        # "720p"/"480p"/"240p" always denote the height (number of rows), regardless of orientation.
         (1920, 1080, "HD (720p)", (1280, 720)),
         (1080, 1920, "HD (720p)", (404, 720)),
-        (1000, 750, "Nízka kvalita (240p - veľmi malé)", (320, 240)),
-        # Nepárny pomer strán - overuje zaokrúhlenie výsledku na párne čísla.
-        (640, 427, "SD (480p - malé)", (718, 480)),
-        # Neznáma/pôvodná voľba ("Originál") - vráti sa pôvodné rozlíšenie, len zarovnané na párne čísla.
-        (101, 51, "Originál (Môže sekať pc)", (100, 50)),
+        (1000, 750, "Low quality (240p - very small)", (320, 240)),
+        # Odd aspect ratio - verifies the result is rounded to even numbers.
+        (640, 427, "SD (480p - small)", (718, 480)),
+        # Unknown/original choice ("Original") - the original resolution is returned, just rounded to even numbers.
+        (101, 51, "Original (May lag pc)", (100, 50)),
     ],
 )
 def test_compute_target_resolution(width, height, resolution_choice, expected):
@@ -58,12 +58,12 @@ def test_compute_target_resolution_result_is_always_even():
 
 
 def test_compute_letterbox_layout_matching_aspect_ratio_fills_canvas():
-    # Fotka s rovnakým pomerom strán ako plátno - žiadne pruhy, žiadne odsadenie.
+    # A photo with the same aspect ratio as the canvas - no bars, no offset.
     assert compute_letterbox_layout(1920, 1080, 1280, 720) == (1280, 720, 0, 0)
 
 
 def test_compute_letterbox_layout_portrait_photo_into_landscape_canvas():
-    # Fotka na výšku do plátna na šírku (napr. z prvej krajinkovej fotky) - pruhy po stranách (pillarbox).
+    # A portrait photo into a landscape canvas (e.g. from the first, landscape photo) - bars on the sides (pillarbox).
     new_width, new_height, x_offset, y_offset = compute_letterbox_layout(1080, 1920, 1920, 1080)
     assert (new_width, new_height) == (608, 1080)
     assert y_offset == 0
@@ -71,7 +71,7 @@ def test_compute_letterbox_layout_portrait_photo_into_landscape_canvas():
 
 
 def test_compute_letterbox_layout_landscape_photo_into_portrait_canvas():
-    # Fotka na šírku do plátna na výšku - pruhy hore/dole (letterbox).
+    # A landscape photo into a portrait canvas - bars on top/bottom (letterbox).
     new_width, new_height, x_offset, y_offset = compute_letterbox_layout(1920, 1080, 1080, 1920)
     assert (new_width, new_height) == (1080, 608)
     assert x_offset == 0

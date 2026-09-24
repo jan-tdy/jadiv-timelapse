@@ -1,24 +1,25 @@
-"""Zdieľaná, testovateľná logika používaná oboma desktopovými GUI variantami
-(jadiv-timelapse.py aj jadiv-timelapse_plus.py): prirodzené triedenie súborov
-podľa názvu a výpočet cieľového rozlíšenia videa so zachovaním pomeru strán.
+"""Shared, testable logic used by both desktop GUI variants
+(jadiv-timelapse.py and jadiv-timelapse_plus.py): natural sorting of files
+by name and computing the target video resolution while preserving aspect ratio.
 """
 import re
 
 
 def natural_sort_key(path):
-    """Rozdelí cestu na text/čísla, aby sa fotky triedili číselne (napr. 2 pred 10), nie čisto abecedne."""
+    """Splits a path into text/number chunks so photos sort numerically (e.g. 2 before 10), not purely alphabetically."""
     return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', path)]
 
 
 def compute_target_resolution(width, height, resolution_choice):
-    """Vypočíta cieľové rozlíšenie videa podľa výberu v UI (`resolution_choice`),
-    so zachovaním pomeru strán, a zaokrúhli výsledok na párne čísla (vyžadujú to video kodeky).
+    """Computes the target video resolution from the UI selection (`resolution_choice`),
+    preserving aspect ratio, and rounds the result to even numbers (required by video codecs).
 
-    "Full HD"/"4K" udávajú dlhšiu (vodorovnú) stranu videa. Pri fotke na výšku (portrét)
-    sa preto aplikujú na výšku, nie na šírku - inak by vyšlo absurdne vysoké video namiesto
-    rozumného zvislého formátu. "720p"/"480p"/"240p" udávajú počet riadkov (výšku) a platí
-    to bez ohľadu na orientáciu fotky. Ak výber nezodpovedá žiadnej z týchto značiek
-    (napr. "Originál"), vráti sa pôvodné rozlíšenie (zaokrúhlené na párne čísla).
+    "Full HD"/"4K" denote the longer (horizontal) side of the video. For a portrait photo,
+    they're therefore applied to the height instead of the width - otherwise you'd get an
+    absurdly tall video instead of a sensible vertical format. "720p"/"480p"/"240p" denote
+    the number of rows (height) and this applies regardless of photo orientation. If the
+    selection doesn't match any of these labels (e.g. "Original"), the original resolution
+    is returned (rounded to even numbers).
     """
     target_width = width
     target_height = height
@@ -50,7 +51,7 @@ def compute_target_resolution(width, height, resolution_choice):
         target_height = 240
         target_width = int((240 / height) * width)
 
-    # Kodeky MP4 vyžadujú, aby šírka aj výška boli párne čísla, inak zlyhajú
+    # MP4 codecs require both width and height to be even numbers, otherwise they fail
     target_width -= target_width % 2
     target_height -= target_height % 2
 
@@ -58,17 +59,19 @@ def compute_target_resolution(width, height, resolution_choice):
 
 
 def compute_letterbox_layout(src_width, src_height, target_width, target_height):
-    """Vypočíta rozmery a odsadenie potrebné na vloženie fotky (src_width x src_height)
-    do plátna s cieľovým rozlíšením (target_width x target_height) so zachovaním jej
-    pôvodného pomeru strán ("letterbox"/"pillarbox").
+    """Computes the size and offset needed to place a photo (src_width x src_height)
+    onto a canvas with the target resolution (target_width x target_height) while
+    preserving its original aspect ratio ("letterbox"/"pillarbox").
 
-    Cieľové rozlíšenie sa určuje z prvej fotky v priečinku (pozri `compute_target_resolution`),
-    takže ďalšie fotky s iným pomerom strán by sa pri priamom zmenšení na tieto rozmery
-    natiahli/skreslili. Namiesto toho sa fotka zmenší tak, aby sa celá zmestila dovnútra plátna,
-    a zvyšný priestor (čierne pruhy) sa rozdelí rovnomerne na obe strany, aby bola vycentrovaná.
+    The target resolution is derived from the first photo in the folder (see
+    `compute_target_resolution`), so other photos with a different aspect ratio would be
+    stretched/distorted if resized directly to those dimensions. Instead, the photo is
+    scaled down so it fits entirely within the canvas, and the remaining space (black bars)
+    is split evenly on both sides to keep it centered.
 
-    Vracia (new_width, new_height, x_offset, y_offset): new_width/new_height sú rozmery
-    zmenšenej fotky, x_offset/y_offset jej pozícia (odsadenie od okraja plátna).
+    Returns (new_width, new_height, x_offset, y_offset): new_width/new_height are the
+    dimensions of the scaled photo, x_offset/y_offset is its position (offset from the
+    canvas edge).
     """
     scale = min(target_width / src_width, target_height / src_height)
     new_width = min(max(round(src_width * scale), 1), target_width)
