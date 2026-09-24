@@ -229,6 +229,14 @@
             </select>
         </div>
 
+        <div class="form-group">
+            <label for="watermarkToggle">Watermark:</label>
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
+                <input type="checkbox" id="watermarkToggle" checked>
+                Pridať záverečný watermark (4s, propagácia Jadiv-Timelapse)
+            </label>
+        </div>
+
         <div class="progress-container" id="progressWrapper">
             <div class="progress-bar" id="progressBar"></div>
         </div>
@@ -245,7 +253,7 @@
 
     <script src="resolution.js"></script>
     <script>
-        const APP_VERSION = '1.10.1';
+        const APP_VERSION = '1.11.0';
         const GITHUB_REPO = 'jan-tdy/jadiv-timelapse';
 
         const OUTRO_DURATION_SECONDS = 4;
@@ -260,6 +268,18 @@
             { text: OUTRO_LINE2, px: 45, weight: 'normal', color: '#dcdcdc' },
             { text: OUTRO_LINE3, px: 36, weight: 'normal', color: '#aaaaaa' },
         ];
+
+        // Vykreslí fotku na plátno so zachovaním pomeru strán (letterbox/pillarbox) namiesto
+        // jej natiahnutia na celé plátno - fotky s iným pomerom strán ako prvá fotka
+        // (z ktorej sa určuje cieľové rozlíšenie) by sa inak skreslili.
+        function drawLetterboxed(ctx, img, srcWidth, srcHeight, targetWidth, targetHeight) {
+            const { width, height, xOffset, yOffset } = computeLetterboxLayout(
+                srcWidth, srcHeight, targetWidth, targetHeight
+            );
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, targetWidth, targetHeight);
+            ctx.drawImage(img, xOffset, yOffset, width, height);
+        }
 
         // Vykreslí čiernu snímku s watermarkom na konci videa (propagácia projektu)
         function drawOutroFrame(ctx, width, height) {
@@ -339,6 +359,7 @@
         const imageFilesInput = document.getElementById('imageFiles');
         const fpsInput = document.getElementById('fps');
         const resolutionSelect = document.getElementById('resolution');
+        const watermarkToggle = document.getElementById('watermarkToggle');
         const startBtn = document.getElementById('startBtn');
         const cancelBtn = document.getElementById('cancelBtn');
         const progressWrapper = document.getElementById('progressWrapper');
@@ -423,6 +444,7 @@
             imageFilesInput.disabled = true;
             fpsInput.disabled = true;
             resolutionSelect.disabled = true;
+            watermarkToggle.disabled = true;
 
             progressWrapper.style.display = 'block';
             progressBar.style.width = '0%';
@@ -454,7 +476,7 @@
                 // aby stream nezachytil prázdny (čierny) canvas skôr, než sa stihne vykresliť prvý obrázok.
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(firstImg, 0, 0, targetWidth, targetHeight);
+                drawLetterboxed(ctx, firstImg, firstImg.width, firstImg.height, targetWidth, targetHeight);
 
                 statusText.innerText = `Výstupné rozlíšenie: ${targetWidth}×${targetHeight}. Spracovávam...`;
 
@@ -510,10 +532,12 @@
                         continue;
                     }
 
-                    // Vykreslenie s "vyhladením" (analógia cv2.INTER_AREA vo webe)
+                    // Vykreslenie s "vyhladením" (analógia cv2.INTER_AREA vo webe), so
+                    // zachovaním pomeru strán (letterbox/pillarbox) pre fotky s iným
+                    // pomerom strán ako prvá fotka
                     ctx.imageSmoothingEnabled = true;
                     ctx.imageSmoothingQuality = 'high';
-                    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+                    drawLetterboxed(ctx, img, img.width, img.height, targetWidth, targetHeight);
                     drawnCount++;
 
                     // Vypočítať, koľko máme počkať, aby sme zachovali FPS
@@ -525,8 +549,8 @@
                 }
 
                 // Watermark na konci videa (propagácia projektu) - iba ak spracovanie
-                // prebehlo v poriadku, nie pri zrušení
-                if (!wasCancelled && drawnCount > 0) {
+                // prebehlo v poriadku, nie pri zrušení, a je zapnutý v prepínači
+                if (!wasCancelled && drawnCount > 0 && watermarkToggle.checked) {
                     statusText.innerText = 'Pridávam záverečný watermark...';
                     drawOutroFrame(ctx, targetWidth, targetHeight);
                     await sleep(OUTRO_DURATION_SECONDS * 1000);
@@ -578,6 +602,7 @@
                 imageFilesInput.disabled = false;
                 fpsInput.disabled = false;
                 resolutionSelect.disabled = false;
+                watermarkToggle.disabled = false;
             }
         });
     </script>

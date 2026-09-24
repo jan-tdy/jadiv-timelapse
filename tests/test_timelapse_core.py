@@ -1,6 +1,6 @@
 import pytest
 
-from timelapse_core import compute_target_resolution, natural_sort_key
+from timelapse_core import compute_letterbox_layout, compute_target_resolution, natural_sort_key
 
 
 def test_natural_sort_key_orders_numbers_numerically():
@@ -55,3 +55,38 @@ def test_compute_target_resolution_result_is_always_even():
             target_width, target_height = compute_target_resolution(width, height, "HD (720p)")
             assert target_width % 2 == 0
             assert target_height % 2 == 0
+
+
+def test_compute_letterbox_layout_matching_aspect_ratio_fills_canvas():
+    # Fotka s rovnakým pomerom strán ako plátno - žiadne pruhy, žiadne odsadenie.
+    assert compute_letterbox_layout(1920, 1080, 1280, 720) == (1280, 720, 0, 0)
+
+
+def test_compute_letterbox_layout_portrait_photo_into_landscape_canvas():
+    # Fotka na výšku do plátna na šírku (napr. z prvej krajinkovej fotky) - pruhy po stranách (pillarbox).
+    new_width, new_height, x_offset, y_offset = compute_letterbox_layout(1080, 1920, 1920, 1080)
+    assert (new_width, new_height) == (608, 1080)
+    assert y_offset == 0
+    assert x_offset == (1920 - 608) // 2
+
+
+def test_compute_letterbox_layout_landscape_photo_into_portrait_canvas():
+    # Fotka na šírku do plátna na výšku - pruhy hore/dole (letterbox).
+    new_width, new_height, x_offset, y_offset = compute_letterbox_layout(1920, 1080, 1080, 1920)
+    assert (new_width, new_height) == (1080, 608)
+    assert x_offset == 0
+    assert y_offset == (1920 - 608) // 2
+
+
+def test_compute_letterbox_layout_never_exceeds_canvas():
+    for src_width in range(97, 105):
+        for src_height in range(97, 105):
+            new_width, new_height, x_offset, y_offset = compute_letterbox_layout(
+                src_width, src_height, 100, 100
+            )
+            assert 1 <= new_width <= 100
+            assert 1 <= new_height <= 100
+            assert x_offset >= 0
+            assert y_offset >= 0
+            assert x_offset + new_width <= 100
+            assert y_offset + new_height <= 100

@@ -12,16 +12,18 @@ import cv2
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QComboBox,
-                             QSpinBox, QProgressBar, QFileDialog, QMessageBox)
+                             QSpinBox, QProgressBar, QFileDialog, QMessageBox,
+                             QCheckBox)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
-from timelapse_core import natural_sort_key, compute_target_resolution
+from timelapse_core import natural_sort_key, compute_target_resolution, compute_letterbox_layout
 
-APP_VERSION = "1.10.1"
+APP_VERSION = "1.11.0"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
-# --nomark vypne pridávanie záverečného watermarku do videa
+# --nomark nastaví predvolený stav prepínača watermarku v UI na vypnutý (dá sa zapnúť späť
+# priamo v okne, --nomark len mení predvolenú hodnotu pri spustení)
 SKIP_WATERMARK = "--nomark" in sys.argv
 
 OUTRO_DURATION_SECONDS = 4
@@ -82,6 +84,24 @@ def imread_unicode(path):
     if data.size == 0:
         return None
     return cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+
+def letterbox_resize(img, target_width, target_height):
+    """Zmenší fotku so zachovaním pomeru strán tak, aby sa celá zmestila do cieľového
+    rozlíšenia, a doplní čierne pruhy (letterbox/pillarbox) na zvyšok plátna.
+
+    Cieľové rozlíšenie sa počíta z pomeru strán prvej fotky v priečinku - bez tohto by sa
+    ďalšie fotky s iným pomerom strán (napr. namixované portrét/landscape) pri priamom
+    cv2.resize() na tieto rozmery natiahli/skreslili namiesto toho, aby boli orámované.
+    """
+    src_height, src_width = img.shape[:2]
+    new_width, new_height, x_offset, y_offset = compute_letterbox_layout(
+        src_width, src_height, target_width, target_height
+    )
+    resized = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    canvas = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+    canvas[y_offset:y_offset + new_height, x_offset:x_offset + new_width] = resized
+    return canvas
 
 
 def _version_tuple(version):
@@ -179,12 +199,13 @@ class VideoWorker(QThread):
     finished = pyqtSignal(bool, str)
     cancelled = pyqtSignal(str)
 
-    def __init__(self, input_folder, output_file, fps, resolution_choice):
+    def __init__(self, input_folder, output_file, fps, resolution_choice, add_watermark=True):
         super().__init__()
         self.input_folder = input_folder
         self.output_file = output_file
         self.fps = fps
         self.resolution_choice = resolution_choice
+        self.add_watermark = add_watermark
         self._cancel_requested = False
 
     def cancel(self):
@@ -238,9 +259,10 @@ class VideoWorker(QThread):
                     if img is None:
                         continue
 
-                    # Zmenšenie (INTER_AREA je najlepšie pre zmenšovanie kvality)
+                    # Zmenšenie so zachovaním pomeru strán a orámovaním (INTER_AREA je
+                    # najlepšie pre zmenšovanie kvality)
                     if img.shape[:2] != (target_height, target_width):
-                        img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                        img = letterbox_resize(img, target_width, target_height)
 
                     try:
                         video.write(img)
@@ -255,7 +277,7 @@ class VideoWorker(QThread):
 
                 # Watermark na konci videa (propagácia projektu) - iba ak spracovanie
                 # prebehlo v poriadku, nie pri zrušení alebo chybe zápisu
-                if not was_cancelled and not write_failed and not SKIP_WATERMARK:
+                if not was_cancelled and not write_failed and self.add_watermark:
                     self.progress_update.emit(100, "Pridávam záverečný watermark...")
                     outro_frame = build_outro_frame(target_width, target_height)
                     outro_frame_count = max(round(self.fps * OUTRO_DURATION_SECONDS), 1)
@@ -427,13 +449,18 @@ class TimelapseApp(QWidget):
             "Originál (Môže sekať pc)"
         ])
         self.resolution_combo.setCurrentIndex(1) # Default: Full HD
-        
+
         settings_layout.addWidget(fps_label)
         settings_layout.addWidget(self.fps_spinbox)
         settings_layout.addSpacing(20)
         settings_layout.addWidget(res_label)
         settings_layout.addWidget(self.resolution_combo, 1) # roztiahne sa
         main_layout.addLayout(settings_layout)
+
+        # Prepínač záverečného watermarku (predvolene podľa --nomark parametra pri spustení)
+        self.watermark_checkbox = QCheckBox("Pridať záverečný watermark (4s, propagácia Jadiv-Timelapse)")
+        self.watermark_checkbox.setChecked(not SKIP_WATERMARK)
+        main_layout.addWidget(self.watermark_checkbox)
 
         # Medzera
         main_layout.addSpacing(10)
@@ -525,6 +552,7 @@ class TimelapseApp(QWidget):
         self.output_file_entry.setEnabled(False)
         self.fps_spinbox.setEnabled(False)
         self.resolution_combo.setEnabled(False)
+        self.watermark_checkbox.setEnabled(False)
 
         self.progress_bar.setValue(0)
         self.status_label.setText("Spracovávam... Prosím čakajte.")
@@ -533,8 +561,9 @@ class TimelapseApp(QWidget):
         # Spustenie vlákna
         fps = self.fps_spinbox.value()
         resolution = self.resolution_combo.currentText()
+        add_watermark = self.watermark_checkbox.isChecked()
 
-        self.worker = VideoWorker(in_folder, out_file, fps, resolution)
+        self.worker = VideoWorker(in_folder, out_file, fps, resolution, add_watermark)
         self.worker.progress_update.connect(self.update_progress)
         self.worker.finished.connect(self.processing_finished)
         self.worker.cancelled.connect(self.processing_cancelled)
@@ -558,6 +587,7 @@ class TimelapseApp(QWidget):
         self.output_file_entry.setEnabled(True)
         self.fps_spinbox.setEnabled(True)
         self.resolution_combo.setEnabled(True)
+        self.watermark_checkbox.setEnabled(True)
 
     def processing_finished(self, success, message):
         self._unlock_ui()

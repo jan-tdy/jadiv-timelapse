@@ -3,7 +3,7 @@
 
 const assert = require('assert');
 const path = require('path');
-const computeTargetResolution = require(path.join(__dirname, '..', 'resolution.js'));
+const { computeTargetResolution, computeLetterboxLayout } = require(path.join(__dirname, '..', 'resolution.js'));
 
 let passed = 0;
 
@@ -71,6 +71,40 @@ test('result is always even, across a range of odd input dimensions', () => {
             );
             assert.strictEqual(targetWidth % 2, 0, `width ${targetWidth} should be even`);
             assert.strictEqual(targetHeight % 2, 0, `height ${targetHeight} should be even`);
+        }
+    }
+});
+
+console.log('\ncomputeLetterboxLayout:');
+
+test('matching aspect ratio fills the canvas with no bars', () => {
+    assert.deepStrictEqual(
+        computeLetterboxLayout(1920, 1080, 1280, 720),
+        { width: 1280, height: 720, xOffset: 0, yOffset: 0 }
+    );
+});
+
+test('portrait photo into a landscape canvas gets pillarboxed', () => {
+    const result = computeLetterboxLayout(1080, 1920, 1920, 1080);
+    assert.deepStrictEqual(result, { width: 608, height: 1080, xOffset: 656, yOffset: 0 });
+});
+
+test('landscape photo into a portrait canvas gets letterboxed', () => {
+    const result = computeLetterboxLayout(1920, 1080, 1080, 1920);
+    assert.deepStrictEqual(result, { width: 1080, height: 608, xOffset: 0, yOffset: 656 });
+});
+
+test('never exceeds the canvas, across a range of odd input dimensions', () => {
+    for (let srcWidth = 97; srcWidth < 105; srcWidth++) {
+        for (let srcHeight = 97; srcHeight < 105; srcHeight++) {
+            const { width, height, xOffset, yOffset } = computeLetterboxLayout(
+                srcWidth, srcHeight, 100, 100
+            );
+            assert.ok(width >= 1 && width <= 100);
+            assert.ok(height >= 1 && height <= 100);
+            assert.ok(xOffset >= 0 && yOffset >= 0);
+            assert.ok(xOffset + width <= 100);
+            assert.ok(yOffset + height <= 100);
         }
     }
 });
