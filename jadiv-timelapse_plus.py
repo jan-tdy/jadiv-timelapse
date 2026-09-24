@@ -12,16 +12,18 @@ import cv2
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QComboBox,
-                             QSpinBox, QProgressBar, QFileDialog, QMessageBox)
+                             QSpinBox, QProgressBar, QFileDialog, QMessageBox,
+                             QCheckBox)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
-from timelapse_core import natural_sort_key, compute_target_resolution
+from timelapse_core import natural_sort_key, compute_target_resolution, compute_letterbox_layout
 
-APP_VERSION = "1.10.1"
+APP_VERSION = "1.11.0"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
-# --nomark vypne pridávanie záverečného watermarku do videa
+# --nomark sets the default state of the watermark toggle in the UI to off (it can still
+# be switched back on in the window - --nomark only changes the default value at startup)
 SKIP_WATERMARK = "--nomark" in sys.argv
 
 OUTRO_DURATION_SECONDS = 4
@@ -29,8 +31,8 @@ OUTRO_LINE1 = "Made by Jadiv-Timelapse"
 OUTRO_LINE2 = "Simple timelapse creation - no command-line needed"
 OUTRO_LINE3 = f"If you like this, star us on GitHub: github.com/{GITHUB_REPO}"
 
-# (text, font_scale multiplier, thickness multiplier, color) - font_scale/thickness sa škálujú
-# podľa cieľového rozlíšenia (referencia 720p); veľkosti sú 3x pôvodného watermarku
+# (text, font_scale multiplier, thickness multiplier, color) - font_scale/thickness are
+# scaled to the target resolution (reference 720p); sizes are 3x the original watermark
 OUTRO_LINES = (
     (OUTRO_LINE1, 3.3, 6, (255, 255, 255)),
     (OUTRO_LINE2, 1.5, 3, (220, 220, 220)),
@@ -39,7 +41,7 @@ OUTRO_LINES = (
 
 
 def build_outro_frame(width, height):
-    """Čierna snímka s watermarkom, ktorá sa pripojí na koniec videa (propagácia projektu)."""
+    """A black frame with the watermark, appended to the end of the video (project promo)."""
     frame = np.zeros((height, width, 3), dtype=np.uint8)
     scale = height / 720
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -52,8 +54,8 @@ def build_outro_frame(width, height):
         thickness = max(int(round(thickness_mult * scale)), 1)
         (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
 
-        # Pri nízkych rozlíšeniach (napr. 240p) sa dlhší riadok nemusí zmestiť na šírku -
-        # v takom prípade písmo dodatočne zmenšíme, aby sa text nezobrazoval orezaný
+        # At low resolutions (e.g. 240p) the longer line might not fit the width -
+        # in that case shrink the font further so the text isn't shown cropped
         if text_w > max_text_width:
             shrink = max_text_width / text_w
             font_scale = max(font_scale * shrink, 0.3)
@@ -73,8 +75,8 @@ def build_outro_frame(width, height):
 
 
 def imread_unicode(path):
-    """cv2.imread() zlyháva (vráti None) na Windows, ak cesta obsahuje diakritiku;
-    workaround cez np.fromfile + cv2.imdecode, ktoré cestu otvárajú unicode-bezpečne."""
+    """cv2.imread() fails (returns None) on Windows if the path contains accented characters;
+    the workaround is np.fromfile + cv2.imdecode, which open the path in a unicode-safe way."""
     try:
         data = np.fromfile(path, dtype=np.uint8)
     except OSError:
@@ -84,18 +86,37 @@ def imread_unicode(path):
     return cv2.imdecode(data, cv2.IMREAD_COLOR)
 
 
+def letterbox_resize(img, target_width, target_height):
+    """Scales a photo down while preserving its aspect ratio so it fits entirely within the
+    target resolution, and pads the rest of the canvas with black bars (letterbox/pillarbox).
+
+    The target resolution is computed from the aspect ratio of the first photo in the
+    folder - without this, other photos with a different aspect ratio (e.g. a folder mixing
+    portrait/landscape shots) would be stretched/distorted by a direct cv2.resize() to those
+    dimensions instead of being framed.
+    """
+    src_height, src_width = img.shape[:2]
+    new_width, new_height, x_offset, y_offset = compute_letterbox_layout(
+        src_width, src_height, target_width, target_height
+    )
+    resized = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    canvas = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+    canvas[y_offset:y_offset + new_height, x_offset:x_offset + new_width] = resized
+    return canvas
+
+
 def _version_tuple(version):
-    """Prevedie napr. 'v1.10' na (1, 10), aby sa dali verzie porovnávať číselne, nie ako text."""
+    """Converts e.g. 'v1.10' into (1, 10) so versions can be compared numerically, not as text."""
     parts = re.findall(r'\d+', version)
     return tuple(int(p) for p in parts) if parts else (0,)
 
 
 class FfmpegVideoWriter:
     """
-    Zapisuje video cez systémový FFmpeg s kodekom H.264.
-    OpenCV vo svojom pip balíčku H.264 kódovať nevie (iba MPEG-4 "mp4v"), ktorého výstup
-    neprehrajú/neprijmú mobilné aplikácie ani napr. Instagram - preto sa na samotné kódovanie
-    videa namiesto cv2.VideoWriter používa FFmpeg, ktorému sa snímky posielajú cez rúru (pipe).
+    Writes the video via the system's FFmpeg using the H.264 codec.
+    OpenCV's pip package can't encode H.264 (only MPEG-4 "mp4v"), whose output mobile apps
+    and e.g. Instagram won't play/accept - so instead of cv2.VideoWriter, the actual video
+    encoding uses FFmpeg, which frames are streamed to over a pipe.
     """
 
     def __init__(self, output_file, fps, size):
@@ -103,9 +124,9 @@ class FfmpegVideoWriter:
         ffmpeg_exe = shutil.which("ffmpeg")
         if ffmpeg_exe is None:
             raise FileNotFoundError(
-                "FFmpeg sa nenašiel v PATH. Nainštalujte ho (napr. 'sudo apt install ffmpeg' "
-                "na Debian/Ubuntu, 'sudo dnf install ffmpeg' na Fedora, alebo 'brew install ffmpeg' "
-                "na macOS) a skúste to znova."
+                "FFmpeg was not found in PATH. Install it (e.g. 'sudo apt install ffmpeg' "
+                "on Debian/Ubuntu, 'sudo dnf install ffmpeg' on Fedora, or 'brew install ffmpeg' "
+                "on macOS) and try again."
             )
         cmd = [
             ffmpeg_exe, "-y",
@@ -149,7 +170,7 @@ class FfmpegVideoWriter:
 
 
 class UpdateChecker(QThread):
-    """Na pozadí (aby nezamrzlo UI) skontroluje na GitHube najnovšie vydanie a porovná ho s aktuálnou verziou."""
+    """Checks GitHub for the latest release in the background (so the UI doesn't freeze) and compares it to the current version."""
     update_available = pyqtSignal(str, str)
 
     def run(self):
@@ -167,24 +188,25 @@ class UpdateChecker(QThread):
             if latest_tag and _version_tuple(latest_tag) > _version_tuple(APP_VERSION):
                 self.update_available.emit(latest_tag, release_url)
         except (urllib.error.URLError, ValueError, OSError):
-            # Bez internetu, GitHub nedostupný alebo limit API - kontrola sa jednoducho preskočí
+            # No internet, GitHub unreachable, or API rate limit - the check is simply skipped
             pass
 
 
 class VideoWorker(QThread):
     """
-    Pracovné vlákno pre spracovanie videa, aby nezamrzlo hlavné okno (GUI).
+    Worker thread for video processing, so the main window (GUI) doesn't freeze.
     """
     progress_update = pyqtSignal(int, str)
     finished = pyqtSignal(bool, str)
     cancelled = pyqtSignal(str)
 
-    def __init__(self, input_folder, output_file, fps, resolution_choice):
+    def __init__(self, input_folder, output_file, fps, resolution_choice, add_watermark=True):
         super().__init__()
         self.input_folder = input_folder
         self.output_file = output_file
         self.fps = fps
         self.resolution_choice = resolution_choice
+        self.add_watermark = add_watermark
         self._cancel_requested = False
 
     def cancel(self):
@@ -192,37 +214,38 @@ class VideoWorker(QThread):
 
     def run(self):
         try:
-            # Hľadáme aj veľké JPG z Nikonu
+            # Also look for large JPGs from Nikon cameras
             extensions = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
             images = set()
             for ext in extensions:
                 images.update(glob.glob(glob.escape(self.input_folder) + ext))
 
-            # Zoradenie podľa čísel v názve (napr. 2 pred 10), nie čisto abecedne;
-            # set() vyššie zároveň odstráni duplicity (na Windows/macOS by "*.jpg" a "*.JPG" inak našli tie isté súbory dvakrát)
+            # Sort by the numbers in the file name (e.g. 2 before 10), not purely alphabetically;
+            # the set() above also removes duplicates (on Windows/macOS "*.jpg" and "*.JPG" would
+            # otherwise match the same files twice)
             images = sorted(images, key=natural_sort_key)
 
             if not images:
-                self.finished.emit(False, "Chyba: Nenašli sa žiadne obrázky v danom priečinku.")
+                self.finished.emit(False, "Error: No images were found in the selected folder.")
                 return
 
-            # Zistenie rozmerov videa podľa prvého obrázka
+            # Determine video dimensions from the first image
             first_frame = imread_unicode(images[0])
             if first_frame is None:
-                self.finished.emit(False, "Chyba: Prvý obrázok je poškodený a nedá sa načítať.")
+                self.finished.emit(False, "Error: The first image is corrupted and could not be loaded.")
                 return
 
-            # shape[:2] funguje pre farebné aj čiernobiele obrázky
+            # shape[:2] works for both color and grayscale images
             height, width = first_frame.shape[:2]
 
-            # Výpočet nového rozlíšenia (so zachovaním pomeru strán, párne čísla pre kodeky)
+            # Compute the new resolution (preserving aspect ratio, even numbers for codecs)
             target_width, target_height = compute_target_resolution(width, height, self.resolution_choice)
 
-            # Inicializácia zapisovača videa (FFmpeg / H.264)
+            # Initialize the video writer (FFmpeg / H.264)
             try:
                 video = FfmpegVideoWriter(self.output_file, self.fps, (target_width, target_height))
             except OSError as e:
-                self.finished.emit(False, f"Chyba: Nepodarilo sa spustiť FFmpeg pre vytvorenie videa.\n{e}")
+                self.finished.emit(False, f"Error: Failed to start FFmpeg to create the video.\n{e}")
                 return
 
             was_cancelled = False
@@ -238,9 +261,10 @@ class VideoWorker(QThread):
                     if img is None:
                         continue
 
-                    # Zmenšenie (INTER_AREA je najlepšie pre zmenšovanie kvality)
+                    # Scale down while preserving aspect ratio and framing (INTER_AREA is
+                    # best for downscaling quality)
                     if img.shape[:2] != (target_height, target_width):
-                        img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                        img = letterbox_resize(img, target_width, target_height)
 
                     try:
                         video.write(img)
@@ -248,15 +272,15 @@ class VideoWorker(QThread):
                         write_failed = True
                         break
 
-                    # Aktualizácia progress baru a textu
+                    # Update the progress bar and status text
                     progress_percent = int(((i + 1) / total_images) * 100)
-                    status_text = f"Spracované: {i + 1} / {total_images}"
+                    status_text = f"Processed: {i + 1} / {total_images}"
                     self.progress_update.emit(progress_percent, status_text)
 
-                # Watermark na konci videa (propagácia projektu) - iba ak spracovanie
-                # prebehlo v poriadku, nie pri zrušení alebo chybe zápisu
-                if not was_cancelled and not write_failed and not SKIP_WATERMARK:
-                    self.progress_update.emit(100, "Pridávam záverečný watermark...")
+                # Watermark at the end of the video (project promo) - only if processing
+                # completed successfully, not on cancellation or a write failure
+                if not was_cancelled and not write_failed and self.add_watermark:
+                    self.progress_update.emit(100, "Adding closing watermark...")
                     outro_frame = build_outro_frame(target_width, target_height)
                     outro_frame_count = max(round(self.fps * OUTRO_DURATION_SECONDS), 1)
                     for _ in range(outro_frame_count):
@@ -277,18 +301,18 @@ class VideoWorker(QThread):
                         os.remove(self.output_file)
                     except OSError:
                         pass
-                self.cancelled.emit("Spracovanie bolo zrušené.")
+                self.cancelled.emit("Processing was cancelled.")
                 return
 
             if write_failed or video.returncode != 0:
-                self.finished.emit(False, f"Chyba: FFmpeg zlyhal pri vytváraní videa.\n{video.error_output}")
+                self.finished.emit(False, f"Error: FFmpeg failed while creating the video.\n{video.error_output}")
                 return
 
-            # Úspešné dokončenie
-            self.finished.emit(True, "Video bolo úspešne vytvorené a uložené!")
+            # Successful completion
+            self.finished.emit(True, "The video was created and saved successfully!")
 
         except Exception as e:
-            self.finished.emit(False, f"Nastala chyba pri generovaní:\n{str(e)}")
+            self.finished.emit(False, f"An error occurred during generation:\n{str(e)}")
 
 
 class TimelapseApp(QWidget):
@@ -300,8 +324,8 @@ class TimelapseApp(QWidget):
     def initUI(self):
         self.setWindowTitle("Jadiv-Timelapse Plus version(by JapySoft TDY)")
         self.resize(650, 400)
-        
-        # Aplikovanie moderného Dark Mode CSS štýlu
+
+        # Apply a modern dark mode CSS style
         self.setStyleSheet("""
             QWidget {
                 background-color: #2b2b2b;
@@ -370,98 +394,103 @@ class TimelapseApp(QWidget):
             }
         """)
 
-        # Hlavný layout
+        # Main layout
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(25, 25, 25, 25)
         main_layout.setSpacing(15)
 
-        # Nadpis
+        # Title
         title_label = QLabel("🎬 Jadiv-Timelapse")
         title_label.setObjectName("title")
         title_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title_label)
 
-        # 1. Priečinok s fotkami
+        # 1. Photo folder
         folder_layout = QHBoxLayout()
-        folder_label = QLabel("Priečinok s fotkami:")
+        folder_label = QLabel("Photo folder:")
         folder_label.setFixedWidth(140)
         self.input_folder_entry = QLineEdit()
-        self.input_folder_entry.setPlaceholderText("Napr. /home/dpv/Pictures/timelapse")
-        folder_btn = QPushButton("Prehľadávať...")
+        self.input_folder_entry.setPlaceholderText("e.g. /home/dpv/Pictures/timelapse")
+        folder_btn = QPushButton("Browse...")
         folder_btn.clicked.connect(self.browse_input)
         folder_layout.addWidget(folder_label)
         folder_layout.addWidget(self.input_folder_entry)
         folder_layout.addWidget(folder_btn)
         main_layout.addLayout(folder_layout)
 
-        # 2. Výstupný súbor
+        # 2. Output file
         file_layout = QHBoxLayout()
-        file_label = QLabel("Uložiť video ako:")
+        file_label = QLabel("Save video as:")
         file_label.setFixedWidth(140)
         self.output_file_entry = QLineEdit()
-        self.output_file_entry.setPlaceholderText("Napr. /home/dpv/Videos/vystup.mp4")
-        file_btn = QPushButton("Uložiť ako...")
+        self.output_file_entry.setPlaceholderText("e.g. /home/dpv/Videos/output.mp4")
+        file_btn = QPushButton("Save as...")
         file_btn.clicked.connect(self.browse_output)
         file_layout.addWidget(file_label)
         file_layout.addWidget(self.output_file_entry)
         file_layout.addWidget(file_btn)
         main_layout.addLayout(file_layout)
 
-        # 3. FPS a Rozlíšenie
+        # 3. FPS and resolution
         settings_layout = QHBoxLayout()
-        
-        fps_label = QLabel("Rýchlosť (FPS):")
+
+        fps_label = QLabel("Speed (FPS):")
         self.fps_spinbox = QSpinBox()
         self.fps_spinbox.setRange(1, 120)
         self.fps_spinbox.setValue(24)
         self.fps_spinbox.setFixedWidth(60)
-        
-        res_label = QLabel("Rozlíšenie:")
+
+        res_label = QLabel("Resolution:")
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItems([
-            "4K (Vysoká kvalita)",
-            "Full HD (Plynulé prehrávanie)", 
+            "4K (High quality)",
+            "Full HD (Smooth playback)",
             "HD (720p)",
-            "SD (480p - malé)",
-            "Nízka kvalita (240p - veľmi malé)",
-            "Originál (Môže sekať pc)"
+            "SD (480p - small)",
+            "Low quality (240p - very small)",
+            "Original (May lag pc)"
         ])
         self.resolution_combo.setCurrentIndex(1) # Default: Full HD
-        
+
         settings_layout.addWidget(fps_label)
         settings_layout.addWidget(self.fps_spinbox)
         settings_layout.addSpacing(20)
         settings_layout.addWidget(res_label)
-        settings_layout.addWidget(self.resolution_combo, 1) # roztiahne sa
+        settings_layout.addWidget(self.resolution_combo, 1) # stretches to fill
         main_layout.addLayout(settings_layout)
 
-        # Medzera
+        # Closing watermark toggle (default follows the --nomark startup flag)
+        self.watermark_checkbox = QCheckBox("Add closing watermark (4s, Jadiv-Timelapse promo)")
+        self.watermark_checkbox.setChecked(not SKIP_WATERMARK)
+        main_layout.addWidget(self.watermark_checkbox)
+
+        # Spacer
         main_layout.addSpacing(10)
 
-        # 4. Progress bar a Status
+        # 4. Progress bar and status
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         self.progress_bar.setFixedHeight(25)
         main_layout.addWidget(self.progress_bar)
 
-        self.status_label = QLabel("Pripravený na prácu.")
+        self.status_label = QLabel("Ready.")
         self.status_label.setObjectName("status")
         self.status_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(self.status_label)
 
-        # Medzera
+        # Spacer
         main_layout.addSpacing(10)
 
-        # 5. Tlačidlá ŠTART a Zrušiť
+        # 5. START and Cancel buttons
         btn_layout = QHBoxLayout()
 
-        self.start_btn = QPushButton("VYTVORIŤ TIMELAPSE")
+        self.start_btn = QPushButton("CREATE TIMELAPSE")
         self.start_btn.setObjectName("actionBtn")
         self.start_btn.setCursor(Qt.PointingHandCursor)
         self.start_btn.clicked.connect(self.start_processing)
         btn_layout.addWidget(self.start_btn, 1)
 
-        self.cancel_btn = QPushButton("Zrušiť")
+        self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setCursor(Qt.PointingHandCursor)
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self.cancel_processing)
@@ -469,7 +498,7 @@ class TimelapseApp(QWidget):
 
         main_layout.addLayout(btn_layout)
 
-        # Verzia aplikácie v pravom dolnom rohu
+        # App version in the bottom-right corner
         version_label = QLabel(f"v{APP_VERSION}")
         version_label.setStyleSheet("color: #666666; font-size: 8pt;")
         version_label.setAlignment(Qt.AlignRight)
@@ -478,34 +507,34 @@ class TimelapseApp(QWidget):
         self.setLayout(main_layout)
 
     def check_for_updates(self):
-        # Kontrola beží na pozadí, aby neblokovala spustenie okna
+        # The check runs in the background so it doesn't block the window from opening
         self.update_checker = UpdateChecker()
         self.update_checker.update_available.connect(self.show_update_dialog)
         self.update_checker.start()
 
     def show_update_dialog(self, latest_version, release_url):
         msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Dostupná nová verzia")
+        msg_box.setWindowTitle("New version available")
         msg_box.setIcon(QMessageBox.Information)
         msg_box.setText(
-            f"Je dostupná nová verzia {latest_version} (aktuálna verzia: v{APP_VERSION})."
+            f"Version {latest_version} is available (current version: v{APP_VERSION})."
         )
-        msg_box.setInformativeText("Chceš otvoriť stránku so stiahnutím?")
-        open_btn = msg_box.addButton("Otvoriť stránku", QMessageBox.AcceptRole)
-        msg_box.addButton("Neskôr", QMessageBox.RejectRole)
+        msg_box.setInformativeText("Do you want to open the download page?")
+        open_btn = msg_box.addButton("Open page", QMessageBox.AcceptRole)
+        msg_box.addButton("Later", QMessageBox.RejectRole)
         msg_box.exec_()
         if msg_box.clickedButton() == open_btn:
             webbrowser.open(release_url)
 
     def browse_input(self):
-        folder = QFileDialog.getExistingDirectory(self, "Vyber priečinok s obrázkami")
+        folder = QFileDialog.getExistingDirectory(self, "Select the folder with the images")
         if folder:
             self.input_folder_entry.setText(folder)
 
     def browse_output(self):
-        file, _ = QFileDialog.getSaveFileName(self, "Uložiť video", "", "MP4 Video (*.mp4)")
+        file, _ = QFileDialog.getSaveFileName(self, "Save video", "", "MP4 Video (*.mp4)")
         if file:
-            # Vynúti pridanie .mp4 ak to používateľ nenapísal
+            # Force-append .mp4 if the user didn't type it
             if not file.lower().endswith('.mp4'):
                 file += '.mp4'
             self.output_file_entry.setText(file)
@@ -515,26 +544,28 @@ class TimelapseApp(QWidget):
         out_file = self.output_file_entry.text().strip()
 
         if not in_folder or not out_file:
-            QMessageBox.warning(self, "Upozornenie", "Prosím, vyber vstupný priečinok aj výstupný súbor.")
+            QMessageBox.warning(self, "Notice", "Please select both an input folder and an output file.")
             return
 
-        # Zamknutie UI
+        # Lock the UI
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.input_folder_entry.setEnabled(False)
         self.output_file_entry.setEnabled(False)
         self.fps_spinbox.setEnabled(False)
         self.resolution_combo.setEnabled(False)
+        self.watermark_checkbox.setEnabled(False)
 
         self.progress_bar.setValue(0)
-        self.status_label.setText("Spracovávam... Prosím čakajte.")
+        self.status_label.setText("Processing... Please wait.")
         self.status_label.setStyleSheet("color: #0d6efd;")
 
-        # Spustenie vlákna
+        # Start the thread
         fps = self.fps_spinbox.value()
         resolution = self.resolution_combo.currentText()
+        add_watermark = self.watermark_checkbox.isChecked()
 
-        self.worker = VideoWorker(in_folder, out_file, fps, resolution)
+        self.worker = VideoWorker(in_folder, out_file, fps, resolution, add_watermark)
         self.worker.progress_update.connect(self.update_progress)
         self.worker.finished.connect(self.processing_finished)
         self.worker.cancelled.connect(self.processing_cancelled)
@@ -544,7 +575,7 @@ class TimelapseApp(QWidget):
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.cancel()
             self.cancel_btn.setEnabled(False)
-            self.status_label.setText("Rušenie...")
+            self.status_label.setText("Cancelling...")
             self.status_label.setStyleSheet("color: #888888;")
 
     def update_progress(self, percent, text):
@@ -558,20 +589,21 @@ class TimelapseApp(QWidget):
         self.output_file_entry.setEnabled(True)
         self.fps_spinbox.setEnabled(True)
         self.resolution_combo.setEnabled(True)
+        self.watermark_checkbox.setEnabled(True)
 
     def processing_finished(self, success, message):
         self._unlock_ui()
 
         if success:
-            self.status_label.setText("Hotovo!")
+            self.status_label.setText("Done!")
             self.status_label.setStyleSheet("color: #198754;")
             self.progress_bar.setValue(100)
-            QMessageBox.information(self, "Úspech", message)
+            QMessageBox.information(self, "Success", message)
         else:
-            self.status_label.setText("Vyskytla sa chyba.")
+            self.status_label.setText("An error occurred.")
             self.status_label.setStyleSheet("color: #dc3545;")
             self.progress_bar.setValue(0)
-            QMessageBox.critical(self, "Chyba", message)
+            QMessageBox.critical(self, "Error", message)
 
     def processing_cancelled(self, message):
         self._unlock_ui()
@@ -580,7 +612,7 @@ class TimelapseApp(QWidget):
         self.progress_bar.setValue(0)
 
     def keyPressEvent(self, event):
-        # Ak stlačí Enter (Return), spustí sa timelapse
+        # Pressing Enter (Return) starts the timelapse
         if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
             if self.start_btn.isEnabled():
                 self.start_processing()
@@ -588,13 +620,13 @@ class TimelapseApp(QWidget):
             super().keyPressEvent(event)
 
     def closeEvent(self, event):
-        # Zabránime zatvoreniu okna, kým beží spracovanie na pozadí — inak by sa
-        # vlákno tvrdo ukončilo uprostred zápisu videa (poškodený súbor / pád Qt).
+        # Prevent the window from closing while processing is running in the background -
+        # otherwise the thread would be hard-killed mid-write (corrupted file / Qt crash).
         if hasattr(self, 'worker') and self.worker.isRunning():
             QMessageBox.warning(
-                self, "Spracovanie beží",
-                "Video sa ešte vytvára. Najprv spracovanie zruš tlačidlom \"Zrušiť\", "
-                "potom môžeš okno zavrieť."
+                self, "Processing is running",
+                "The video is still being created. First cancel processing with the "
+                "\"Cancel\" button, then you can close the window."
             )
             event.ignore()
         else:
@@ -602,14 +634,14 @@ class TimelapseApp(QWidget):
 
 
 if __name__ == "__main__":
-    # --nomark je vlastný prepínač aplikácie, nie Qt argument - PyQt by ho inak
-    # nahlásil ako neznámu voľbu
+    # --nomark is our own app flag, not a Qt argument - PyQt would otherwise
+    # report it as an unknown option
     qt_argv = [arg for arg in sys.argv if arg != "--nomark"]
     app = QApplication(qt_argv)
-    
-    # Pre zaistenie pekného vzhľadu na rôznych systémoch
+
+    # To ensure a nice look on different systems
     app.setStyle("Fusion")
-    
+
     window = TimelapseApp()
     window.show()
     sys.exit(app.exec_())

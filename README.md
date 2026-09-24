@@ -25,10 +25,11 @@ The project contains three independent variants with the same functionality — 
 - Create a timelapse video from `.jpg` / `.jpeg` / `.png` photos (including large JPGs from cameras)
 - Adjustable frame rate (FPS)
 - Optional target resolution (4K, Full HD, HD, SD, low quality, or original resolution) with aspect ratio preserved
+- Photos with a different aspect ratio than the first one (e.g. a folder mixing portrait and landscape shots) are letterboxed/pillarboxed onto the target resolution instead of being stretched/distorted (desktop `_plus` version and web version; the unmaintained legacy Tkinter version still stretches them)
 - Shows processing progress and lets you cancel processing at any time
 - Processing runs in the background (the GUI/page never freezes)
 - On startup, the app (desktop `_plus` version and web version) checks GitHub for a newer release and shows a notification if one is available; the current version is shown in the corner of the window/page
-- A short "Made by Jadiv-Timelapse" watermark with a link to this repo is appended to the last 4 seconds of the generated video; run `jadiv-timelapse_plus.py` with `--nomark` to skip it
+- A short "Made by Jadiv-Timelapse" watermark with a link to this repo is appended to the last 4 seconds of the generated video; toggle it off in the UI (or run `jadiv-timelapse_plus.py` with `--nomark` to have it start unchecked)
 
 ## Requirements and installation (desktop versions)
 
@@ -93,9 +94,9 @@ In both desktop versions, simply:
 1. Select the folder with the photos.
 2. Choose where and under what name the resulting video should be saved (`.mp4`).
 3. Set the FPS and target resolution.
-4. Click **VYTVORIŤ TIMELAPSE** (or press Enter).
+4. Click **CREATE TIMELAPSE** (`jadiv-timelapse_plus.py`) or **VYTVORIŤ TIMELAPSE** (the legacy, still-Slovak `jadiv-timelapse.py`) — or press Enter.
 
-Processing can be interrupted at any time with the **Zrušiť** (Cancel) button.
+Processing can be interrupted at any time with the **Cancel** button (**Zrušiť** on the legacy version).
 
 ## Notes
 

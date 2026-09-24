@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="sk">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jadiv-Timelapse Web</title>
     <script defer src="https://keepandroidopen.org/banner.js"></script>
     <style>
-        /* Moderný Dark Mode dizajn inšpirovaný tvojou PyQt5 aplikáciou */
+        /* Modern dark mode design inspired by the PyQt5 app */
         :root {
             --bg-color: #2b2b2b;
             --surface-color: #3c3f41;
@@ -198,46 +198,54 @@
 
         <div id="updateBanner">
             <span id="updateBannerText"></span>
-            <button id="updateBannerClose" title="Zavrieť" aria-label="Zavrieť">&times;</button>
+            <button id="updateBannerClose" title="Close" aria-label="Close">&times;</button>
         </div>
 
         <div class="form-group">
-            <label for="imageFiles">Vybrať fotky:</label>
+            <label for="imageFiles">Select photos:</label>
             <input type="file" id="imageFiles" class="form-control" multiple accept="image/jpeg, image/png, image/jpg">
         </div>
         <div class="form-group">
             <label></label>
-            <span id="fileCount" class="status" style="text-align: left; margin-top: 0;">Zatiaľ nie sú vybrané žiadne fotky.</span>
+            <span id="fileCount" class="status" style="text-align: left; margin-top: 0;">No photos selected yet.</span>
         </div>
 
         <div class="form-group">
-            <label for="fps">Rýchlosť (FPS):</label>
+            <label for="fps">Speed (FPS):</label>
             <div class="fps-wrap">
                 <input type="number" id="fps" class="form-control" value="24" min="1" max="120">
-                <span>snímok za sekundu</span>
+                <span>frames per second</span>
             </div>
         </div>
 
         <div class="form-group">
-            <label for="resolution">Rozlíšenie:</label>
+            <label for="resolution">Resolution:</label>
             <select id="resolution" class="form-control">
-                <option value="3840">4K (Vysoká kvalita)</option>
-                <option value="1920" selected>Full HD (Plynulé prehrávanie)</option>
+                <option value="3840">4K (High quality)</option>
+                <option value="1920" selected>Full HD (Smooth playback)</option>
                 <option value="720">HD (720p)</option>
-                <option value="480">SD (480p - malé)</option>
-                <option value="240">Nízka kvalita (240p - veľmi malé)</option>
+                <option value="480">SD (480p - small)</option>
+                <option value="240">Low quality (240p - very small)</option>
             </select>
+        </div>
+
+        <div class="form-group">
+            <label for="watermarkToggle">Watermark:</label>
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
+                <input type="checkbox" id="watermarkToggle" checked>
+                Add closing watermark (4s, Jadiv-Timelapse promo)
+            </label>
         </div>
 
         <div class="progress-container" id="progressWrapper">
             <div class="progress-bar" id="progressBar"></div>
         </div>
-        <div class="status" id="statusText">Pripravený na prácu. (Video sa uloží ako .webm)</div>
+        <div class="status" id="statusText">Ready. (The video will be saved as .webm)</div>
 
-        <button id="startBtn" class="btn-primary">VYTVORIŤ TIMELAPSE</button>
-        <button id="cancelBtn" class="btn-primary" style="display:none; margin-top: 10px; background-color: var(--danger-color);">ZRUŠIŤ</button>
+        <button id="startBtn" class="btn-primary">CREATE TIMELAPSE</button>
+        <button id="cancelBtn" class="btn-primary" style="display:none; margin-top: 10px; background-color: var(--danger-color);">CANCEL</button>
 
-        <!-- Skrytý canvas pre renderovanie videa -->
+        <!-- Hidden canvas for rendering the video -->
         <canvas id="previewCanvas"></canvas>
     </div>
 
@@ -245,7 +253,7 @@
 
     <script src="resolution.js"></script>
     <script>
-        const APP_VERSION = '1.10.1';
+        const APP_VERSION = '1.11.0';
         const GITHUB_REPO = 'jan-tdy/jadiv-timelapse';
 
         const OUTRO_DURATION_SECONDS = 4;
@@ -253,15 +261,28 @@
         const OUTRO_LINE2 = 'Simple timelapse creation - no command-line needed';
         const OUTRO_LINE3 = `If you like this, star us on GitHub: github.com/${GITHUB_REPO}`;
 
-        // (text, veľkosť písma v px pri referenčnej výške 720p, hrúbka, farba) -
-        // veľkosti sú 3x pôvodného watermarku
+        // (text, font size in px at the reference height of 720p, weight, color) -
+        // sizes are 3x the original watermark
         const OUTRO_LINES = [
             { text: OUTRO_LINE1, px: 84, weight: 'bold', color: '#ffffff' },
             { text: OUTRO_LINE2, px: 45, weight: 'normal', color: '#dcdcdc' },
             { text: OUTRO_LINE3, px: 36, weight: 'normal', color: '#aaaaaa' },
         ];
 
-        // Vykreslí čiernu snímku s watermarkom na konci videa (propagácia projektu)
+        // Draws a photo onto the canvas while preserving its aspect ratio (letterbox/pillarbox)
+        // instead of stretching it to fill the whole canvas - photos with a different aspect
+        // ratio than the first photo (which the target resolution is derived from) would
+        // otherwise get distorted.
+        function drawLetterboxed(ctx, img, srcWidth, srcHeight, targetWidth, targetHeight) {
+            const { width, height, xOffset, yOffset } = computeLetterboxLayout(
+                srcWidth, srcHeight, targetWidth, targetHeight
+            );
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, targetWidth, targetHeight);
+            ctx.drawImage(img, xOffset, yOffset, width, height);
+        }
+
+        // Draws a black frame with the watermark at the end of the video (project promo)
         function drawOutroFrame(ctx, width, height) {
             ctx.fillStyle = '#000000';
             ctx.fillRect(0, 0, width, height);
@@ -271,8 +292,8 @@
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
-            // Pre každý riadok zistíme veľkosť písma a pri nízkych rozlíšeniach (napr. 240p)
-            // ho zmenšíme, ak by sa dlhší text nezmestil na šírku plátna
+            // For each line, determine the font size and, at low resolutions (e.g. 240p),
+            // shrink it if the longer text wouldn't fit the canvas width
             const lines = OUTRO_LINES.map(line => {
                 let fontPx = Math.max(line.px * scale, line.px * 0.3);
                 ctx.font = `${line.weight} ${fontPx}px 'Segoe UI', Arial, sans-serif`;
@@ -297,7 +318,7 @@
         }
 
         function versionTuple(version) {
-            // Prevedie napr. "v1.10" na [1, 10], aby sa dali verzie porovnávať číselne, nie ako text
+            // Converts e.g. "v1.10" into [1, 10] so versions can be compared numerically, not as text
             const parts = (version.match(/\d+/g) || []).map(Number);
             return parts.length ? parts : [0];
         }
@@ -314,7 +335,7 @@
 
         document.getElementById('versionBadge').innerText = `v${APP_VERSION}`;
 
-        // Kontrola najnovšieho vydania na GitHube pri načítaní stránky (bez blokovania UI)
+        // Check GitHub for the latest release on page load (without blocking the UI)
         fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`)
             .then(response => response.ok ? response.json() : null)
             .then(data => {
@@ -322,14 +343,14 @@
                 if (isNewerVersion(data.tag_name, APP_VERSION)) {
                     const banner = document.getElementById('updateBanner');
                     document.getElementById('updateBannerText').innerHTML =
-                        `Je dostupná nová verzia <strong>${data.tag_name}</strong> ` +
-                        `(aktuálna verzia: v${APP_VERSION}). ` +
-                        `<a href="${data.html_url}" target="_blank" rel="noopener noreferrer">Zobraziť vydanie</a>`;
+                        `Version <strong>${data.tag_name}</strong> is available ` +
+                        `(current version: v${APP_VERSION}). ` +
+                        `<a href="${data.html_url}" target="_blank" rel="noopener noreferrer">View release</a>`;
                     banner.classList.add('visible');
                 }
             })
             .catch(() => {
-                // Bez internetu / GitHub nedostupný / limit API - kontrola sa jednoducho preskočí
+                // No internet / GitHub unreachable / API rate limit - the check is simply skipped
             });
 
         document.getElementById('updateBannerClose').addEventListener('click', () => {
@@ -339,6 +360,7 @@
         const imageFilesInput = document.getElementById('imageFiles');
         const fpsInput = document.getElementById('fps');
         const resolutionSelect = document.getElementById('resolution');
+        const watermarkToggle = document.getElementById('watermarkToggle');
         const startBtn = document.getElementById('startBtn');
         const cancelBtn = document.getElementById('cancelBtn');
         const progressWrapper = document.getElementById('progressWrapper');
@@ -351,7 +373,7 @@
         let cancelRequested = false;
         let isProcessing = false;
 
-        // Upozorní pri zatvorení/opustení stránky, kým beží spracovanie (video by sa stratilo)
+        // Warn when closing/leaving the page while processing is running (the video would be lost)
         window.addEventListener('beforeunload', (e) => {
             if (isProcessing) {
                 e.preventDefault();
@@ -362,11 +384,11 @@
         imageFilesInput.addEventListener('change', () => {
             const n = imageFilesInput.files.length;
             fileCount.innerText = n === 0
-                ? 'Zatiaľ nie sú vybrané žiadne fotky.'
-                : `Vybraných fotiek: ${n}`;
+                ? 'No photos selected yet.'
+                : `Photos selected: ${n}`;
         });
 
-        // Funkcia na načítanie obrázka
+        // Function to load an image
         function loadImage(file) {
             return new Promise((resolve, reject) => {
                 const img = new Image();
@@ -377,35 +399,35 @@
                 };
                 img.onerror = () => {
                     URL.revokeObjectURL(url);
-                    reject(new Error(`Nepodarilo sa načítať súbor "${file.name}"`));
+                    reject(new Error(`Failed to load file "${file.name}"`));
                 };
                 img.src = url;
             });
         }
 
-        // Pomocná funkcia na čakanie (simulácia FPS)
+        // Helper function for waiting (simulates FPS)
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
         cancelBtn.addEventListener('click', () => {
             cancelRequested = true;
             cancelBtn.disabled = true;
-            statusText.innerText = 'Rušenie...';
+            statusText.innerText = 'Cancelling...';
         });
 
         startBtn.addEventListener('click', async () => {
             const files = Array.from(imageFilesInput.files);
 
             if (files.length === 0) {
-                alert('Prosím, vyberte aspoň jednu fotografiu.');
+                alert('Please select at least one photo.');
                 return;
             }
 
-            // Zoradenie súborov podľa názvu
+            // Sort files by name
             files.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true}));
 
             const fps = parseInt(fpsInput.value, 10);
             if (!Number.isFinite(fps) || fps < 1 || fps > 120) {
-                alert('Rýchlosť (FPS) musí byť celé číslo medzi 1 a 120.');
+                alert('Speed (FPS) must be a whole number between 1 and 120.');
                 return;
             }
 
@@ -413,7 +435,7 @@
             const resolutionValue = parseInt(resolutionOption.value, 10);
             const resolutionLabel = resolutionOption.text;
 
-            // Uzamknutie UI
+            // Lock the UI
             cancelRequested = false;
             isProcessing = true;
             startBtn.disabled = true;
@@ -423,14 +445,15 @@
             imageFilesInput.disabled = true;
             fpsInput.disabled = true;
             resolutionSelect.disabled = true;
+            watermarkToggle.disabled = true;
 
             progressWrapper.style.display = 'block';
             progressBar.style.width = '0%';
-            statusText.innerText = 'Analyzujem prvú snímku...';
+            statusText.innerText = 'Analyzing the first frame...';
             statusText.style.color = '#0d6efd';
 
             try {
-                // 1. Zistiť rozmer z prvej načítateľnej fotky (prvý súbor môže byť poškodený)
+                // 1. Determine dimensions from the first loadable photo (the first file may be corrupted)
                 let firstImg = null;
                 for (const file of files) {
                     try {
@@ -441,7 +464,7 @@
                     }
                 }
                 if (!firstImg) {
-                    throw new Error('Žiadnu z vybraných fotiek sa nepodarilo načítať.');
+                    throw new Error('None of the selected photos could be loaded.');
                 }
                 const { width: targetWidth, height: targetHeight } = computeTargetResolution(
                     firstImg.width, firstImg.height, resolutionLabel, resolutionValue
@@ -450,17 +473,17 @@
                 canvas.width = targetWidth;
                 canvas.height = targetHeight;
 
-                // Vykresliť prvú snímku na canvas ešte pred spustením captureStream/nahrávania,
-                // aby stream nezachytil prázdny (čierny) canvas skôr, než sa stihne vykresliť prvý obrázok.
+                // Draw the first frame onto the canvas before starting captureStream/recording,
+                // so the stream doesn't capture an empty (black) canvas before the first image is drawn.
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(firstImg, 0, 0, targetWidth, targetHeight);
+                drawLetterboxed(ctx, firstImg, firstImg.width, firstImg.height, targetWidth, targetHeight);
 
-                statusText.innerText = `Výstupné rozlíšenie: ${targetWidth}×${targetHeight}. Spracovávam...`;
+                statusText.innerText = `Output resolution: ${targetWidth}×${targetHeight}. Processing...`;
 
-                // 2. Príprava MediaRecorder
+                // 2. Prepare MediaRecorder
                 const stream = canvas.captureStream(fps);
-                // Preferujeme VP9 pre lepšiu kvalitu, ak nie je k dispozícii, fallbackne sa na predvolený
+                // Prefer VP9 for better quality, fall back to the default if unavailable
                 let options = { mimeType: 'video/webm; codecs=vp9' };
                 let recorder;
                 try {
@@ -480,10 +503,10 @@
                     recorder.onstop = resolve;
                 });
 
-                // Spustenie nahrávania
+                // Start recording
                 recorder.start();
 
-                // 3. Renderovanie snímok na Canvas
+                // 3. Render frames onto the canvas
                 const frameDurationMs = 1000 / fps;
                 let drawnCount = 0;
                 let skippedCount = 0;
@@ -497,10 +520,10 @@
 
                     const t0 = performance.now();
 
-                    statusText.innerText = `Spracovávam: ${i + 1} / ${files.length} (výstup ${targetWidth}×${targetHeight})`;
+                    statusText.innerText = `Processing: ${i + 1} / ${files.length} (output ${targetWidth}×${targetHeight})`;
                     progressBar.style.width = `${((i + 1) / files.length) * 100}%`;
 
-                    // Načítať a vykresliť; poškodenú/nečitateľnú fotku len preskočíme
+                    // Load and draw; a corrupted/unreadable photo is simply skipped
                     let img;
                     try {
                         img = await loadImage(files[i]);
@@ -510,13 +533,15 @@
                         continue;
                     }
 
-                    // Vykreslenie s "vyhladením" (analógia cv2.INTER_AREA vo webe)
+                    // Draw with "smoothing" (analogous to cv2.INTER_AREA on the web), preserving
+                    // the aspect ratio (letterbox/pillarbox) for photos with a different aspect
+                    // ratio than the first photo
                     ctx.imageSmoothingEnabled = true;
                     ctx.imageSmoothingQuality = 'high';
-                    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+                    drawLetterboxed(ctx, img, img.width, img.height, targetWidth, targetHeight);
                     drawnCount++;
 
-                    // Vypočítať, koľko máme počkať, aby sme zachovali FPS
+                    // Compute how long to wait to maintain the target FPS
                     const t1 = performance.now();
                     const processTime = t1 - t0;
                     const waitTime = Math.max(0, frameDurationMs - processTime);
@@ -524,27 +549,27 @@
                     await sleep(waitTime);
                 }
 
-                // Watermark na konci videa (propagácia projektu) - iba ak spracovanie
-                // prebehlo v poriadku, nie pri zrušení
-                if (!wasCancelled && drawnCount > 0) {
-                    statusText.innerText = 'Pridávam záverečný watermark...';
+                // Watermark at the end of the video (project promo) - only if processing
+                // completed successfully, not on cancellation, and only if the toggle is on
+                if (!wasCancelled && drawnCount > 0 && watermarkToggle.checked) {
+                    statusText.innerText = 'Adding closing watermark...';
                     drawOutroFrame(ctx, targetWidth, targetHeight);
                     await sleep(OUTRO_DURATION_SECONDS * 1000);
                 }
 
-                // Trochu počkáme na poslednú snímku a zastavíme
+                // Wait a bit for the last frame and then stop
                 await sleep(100);
                 recorder.stop();
                 await recordingFinished;
 
                 if (wasCancelled) {
-                    statusText.innerText = 'Spracovanie bolo zrušené.';
+                    statusText.innerText = 'Processing was cancelled.';
                     statusText.style.color = '#aaa';
                 } else if (drawnCount === 0) {
-                    throw new Error('Ani jednu fotku sa nepodarilo spracovať, video nebolo vytvorené.');
+                    throw new Error('None of the photos could be processed, no video was created.');
                 } else {
-                    // 4. Stiahnutie hotového videa
-                    statusText.innerText = 'Video sa generuje a sťahuje...';
+                    // 4. Download the finished video
+                    statusText.innerText = 'Generating and downloading the video...';
 
                     const blob = new Blob(chunks, { type: 'video/webm' });
                     const videoUrl = URL.createObjectURL(blob);
@@ -559,17 +584,17 @@
                     setTimeout(() => URL.revokeObjectURL(videoUrl), 10000);
 
                     statusText.innerText = skippedCount > 0
-                        ? `Hotovo! Video bolo stiahnuté (preskočených poškodených fotiek: ${skippedCount}).`
-                        : 'Hotovo! Video bolo stiahnuté.';
+                        ? `Done! The video was downloaded (skipped corrupted photos: ${skippedCount}).`
+                        : 'Done! The video was downloaded.';
                     statusText.style.color = '#198754';
                 }
 
             } catch (err) {
                 console.error(err);
-                statusText.innerText = 'Nastala chyba: ' + err.message;
+                statusText.innerText = 'An error occurred: ' + err.message;
                 statusText.style.color = '#dc3545';
             } finally {
-                // Odomknutie UI
+                // Unlock the UI
                 cancelRequested = false;
                 isProcessing = false;
                 startBtn.disabled = false;
@@ -578,6 +603,7 @@
                 imageFilesInput.disabled = false;
                 fpsInput.disabled = false;
                 resolutionSelect.disabled = false;
+                watermarkToggle.disabled = false;
             }
         });
     </script>
