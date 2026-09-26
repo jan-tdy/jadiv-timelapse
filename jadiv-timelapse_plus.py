@@ -5,6 +5,7 @@ import re
 import json
 import shutil
 import subprocess
+import threading
 import urllib.request
 import urllib.error
 import webbrowser
@@ -18,7 +19,7 @@ from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
 from timelapse_core import natural_sort_key, compute_target_resolution, compute_letterbox_layout
 
-APP_VERSION = "1.11.0"
+APP_VERSION = "1.12.0"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -145,6 +146,20 @@ class FfmpegVideoWriter:
         self._process = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
         )
+        # FFmpeg's stderr must be drained continuously in the background: if it fills the
+        # OS pipe buffer (e.g. many warnings) while we're only reading it after all frames
+        # are written, FFmpeg blocks on its stderr write and we block on stdin.write() -
+        # a deadlock where each side waits on the other forever.
+        self._stderr_chunks = []
+        self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._stderr_thread.start()
+
+    def _drain_stderr(self):
+        try:
+            for chunk in iter(lambda: self._process.stderr.read(4096), b""):
+                self._stderr_chunks.append(chunk)
+        except (ValueError, OSError):
+            pass
 
     def write(self, frame):
         self._process.stdin.write(frame.tobytes())
@@ -154,8 +169,9 @@ class FfmpegVideoWriter:
             self._process.stdin.close()
         except OSError:
             pass
-        self.error_output = self._process.stderr.read().decode("utf-8", errors="replace")
         self._process.wait()
+        self._stderr_thread.join()
+        self.error_output = b"".join(self._stderr_chunks).decode("utf-8", errors="replace")
 
     def terminate(self):
         self._process.terminate()
@@ -163,6 +179,8 @@ class FfmpegVideoWriter:
             self._process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             self._process.kill()
+            self._process.wait()
+        self._stderr_thread.join(timeout=5)
 
     @property
     def returncode(self):
