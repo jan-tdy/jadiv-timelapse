@@ -473,8 +473,6 @@
                 canvas.width = targetWidth;
                 canvas.height = targetHeight;
 
-                // Draw the first frame onto the canvas before starting captureStream/recording,
-                // so the stream doesn't capture an empty (black) canvas before the first image is drawn.
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = 'high';
                 drawLetterboxed(ctx, firstImg, firstImg.width, firstImg.height, targetWidth, targetHeight);
@@ -482,7 +480,14 @@
                 statusText.innerText = `Output resolution: ${targetWidth}×${targetHeight}. Processing...`;
 
                 // 2. Prepare MediaRecorder
-                const stream = canvas.captureStream(fps);
+                // captureStream(fps) runs its own internal timer that samples the canvas independently
+                // of the draw loop below, so a draw that lands slightly off that timer's tick gets
+                // captured twice (duplicate) or not at all (dropped), no matter how precisely the loop
+                // paces itself. captureStream(0) disables that automatic timer; we then push exactly
+                // one frame per drawn photo ourselves via track.requestFrame(), so every photo maps to
+                // exactly one output frame.
+                const stream = canvas.captureStream(0);
+                const [track] = stream.getVideoTracks();
                 // Prefer VP9 for better quality, fall back to the default if unavailable
                 let options = { mimeType: 'video/webm; codecs=vp9' };
                 let recorder;
@@ -539,6 +544,7 @@
                     ctx.imageSmoothingEnabled = true;
                     ctx.imageSmoothingQuality = 'high';
                     drawLetterboxed(ctx, img, img.width, img.height, targetWidth, targetHeight);
+                    track.requestFrame();
                     drawnCount++;
 
                     // Compute how long to wait to maintain the target FPS
@@ -554,6 +560,7 @@
                 if (!wasCancelled && drawnCount > 0 && watermarkToggle.checked) {
                     statusText.innerText = 'Adding closing watermark...';
                     drawOutroFrame(ctx, targetWidth, targetHeight);
+                    track.requestFrame();
                     await sleep(OUTRO_DURATION_SECONDS * 1000);
                 }
 
