@@ -8,7 +8,7 @@ import os
 import tempfile
 import shutil
 
-from timelapse_core import natural_sort_key, compute_target_resolution
+from timelapse_core import natural_sort_key, compute_target_resolution, compute_letterbox_layout
 
 
 def imread_unicode(path):
@@ -21,6 +21,18 @@ def imread_unicode(path):
     if data.size == 0:
         return None
     return cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+
+def letterbox_resize(img, target_width, target_height):
+    """Preserve each photo's aspect ratio and center it on the target canvas."""
+    src_height, src_width = img.shape[:2]
+    new_width, new_height, x_offset, y_offset = compute_letterbox_layout(
+        src_width, src_height, target_width, target_height
+    )
+    resized = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    canvas = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+    canvas[y_offset:y_offset + new_height, x_offset:x_offset + new_width] = resized
+    return canvas
 
 
 class TimelapseApp:
@@ -131,6 +143,15 @@ class TimelapseApp:
             messagebox.showwarning("Upozornenie", "Prosím, vyber vstupný priečinok aj výstupný súbor.")
             return
 
+        try:
+            fps = self.fps.get()
+            resolution = self.resolution.get()
+            if fps <= 0:
+                raise ValueError("FPS musí byť kladné číslo.")
+        except (tk.TclError, ValueError) as e:
+            messagebox.showwarning("Upozornenie", f"Neplatné nastavenie FPS alebo rozlíšenia: {e}")
+            return
+
         # Zablokujeme tlačidlo počas práce
         self.is_processing = True
         self.cancel_requested = False
@@ -140,7 +161,7 @@ class TimelapseApp:
         self.status_label.config(text="Spracovávam...", foreground="blue")
 
         # Spustíme spracovanie v novom vlákne (aby nezamrzlo UI okno)
-        thread = threading.Thread(target=self.process_video, args=(in_folder, out_file, self.fps.get(), self.resolution.get()))
+        thread = threading.Thread(target=self.process_video, args=(in_folder, out_file, fps, resolution))
         thread.daemon = True
         thread.start()
 
@@ -209,7 +230,7 @@ class TimelapseApp:
 
                     # Zabezpečenie rozmerov a zmenšenie pomocou vysoko-kvalitného INTER_AREA algoritmu
                     if img.shape[:2] != (target_height, target_width):
-                        img = cv2.resize(img, (target_width, target_height), interpolation=cv2.INTER_AREA)
+                        img = letterbox_resize(img, target_width, target_height)
 
                     video.write(img)
 

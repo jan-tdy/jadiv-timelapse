@@ -4,6 +4,7 @@ import glob
 import re
 import json
 import shutil
+import tempfile
 import subprocess
 import threading
 import urllib.request
@@ -192,6 +193,7 @@ class UpdateChecker(QThread):
     update_available = pyqtSignal(str, str)
 
     def run(self):
+        tmp_output_file = None
         try:
             request = urllib.request.Request(
                 GITHUB_LATEST_RELEASE_API,
@@ -259,9 +261,18 @@ class VideoWorker(QThread):
             # Compute the new resolution (preserving aspect ratio, even numbers for codecs)
             target_width, target_height = compute_target_resolution(width, height, self.resolution_choice)
 
+            # Write beside the destination, then atomically replace it on success so
+            # a failed render never truncates an existing video.
+            output_dir = os.path.dirname(os.path.abspath(self.output_file))
+            fd, tmp_output_file = tempfile.mkstemp(
+                prefix=".timelapse-", suffix=os.path.splitext(self.output_file)[1] or ".mp4",
+                dir=output_dir,
+            )
+            os.close(fd)
+
             # Initialize the video writer (FFmpeg / H.264)
             try:
-                video = FfmpegVideoWriter(self.output_file, self.fps, (target_width, target_height))
+                video = FfmpegVideoWriter(tmp_output_file, self.fps, (target_width, target_height))
             except OSError as e:
                 self.finished.emit(False, f"Error: Failed to start FFmpeg to create the video.\n{e}")
                 return
@@ -314,11 +325,6 @@ class VideoWorker(QThread):
                     video.release()
 
             if was_cancelled:
-                if os.path.exists(self.output_file):
-                    try:
-                        os.remove(self.output_file)
-                    except OSError:
-                        pass
                 self.cancelled.emit("Processing was cancelled.")
                 return
 
@@ -326,11 +332,19 @@ class VideoWorker(QThread):
                 self.finished.emit(False, f"Error: FFmpeg failed while creating the video.\n{video.error_output}")
                 return
 
-            # Successful completion
+            # Publish only a complete video, preserving any previous output on failure.
+            os.replace(tmp_output_file, self.output_file)
+            tmp_output_file = None
             self.finished.emit(True, "The video was created and saved successfully!")
 
         except Exception as e:
             self.finished.emit(False, f"An error occurred during generation:\n{str(e)}")
+        finally:
+            if tmp_output_file and os.path.exists(tmp_output_file):
+                try:
+                    os.remove(tmp_output_file)
+                except OSError:
+                    pass
 
 
 class TimelapseApp(QWidget):
