@@ -19,7 +19,7 @@ jobs:
           python-version: '3.x'
 
       - name: Install test dependencies
-        run: pip install pytest
+        run: pip install pytest pillow numpy opencv-python-headless
 
       - name: Run pytest (timelapse_core.py)
         run: pytest

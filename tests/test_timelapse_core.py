@@ -90,3 +90,91 @@ def test_compute_letterbox_layout_never_exceeds_canvas():
             assert y_offset >= 0
             assert x_offset + new_width <= 100
             assert y_offset + new_height <= 100
+
+
+# --- Sorting by EXIF capture time / file modification time -------------------------
+
+import os
+from datetime import datetime
+
+from timelapse_core import SORT_EXIF, SORT_MODES, SORT_MTIME, SORT_NAME, find_images, sort_image_paths
+
+
+def _write_jpg(path, capture_time=None, subsec=None):
+    """Writes a tiny JPEG, optionally with EXIF DateTimeOriginal (needs Pillow)."""
+    Image = pytest.importorskip("PIL.Image")
+    img = Image.new("RGB", (8, 8), (120, 60, 30))
+    if capture_time is None:
+        img.save(path, "JPEG")
+        return
+    exif = Image.Exif()
+    exif.get_ifd(0x8769)[0x9003] = capture_time
+    if subsec is not None:
+        exif.get_ifd(0x8769)[0x9291] = subsec
+    img.save(path, "JPEG", exif=exif)
+
+
+def _names(paths):
+    return [os.path.basename(p) for p in paths]
+
+
+def test_sort_modes_are_exposed():
+    assert SORT_MODES == ("name", "exif", "mtime")
+
+
+def test_sort_by_name_is_unchanged_default(tmp_path):
+    for name in ["DSC_9999.jpg", "DSC_0001.jpg", "DSC_10000.jpg"]:
+        (tmp_path / name).write_bytes(b"x")
+    paths = find_images(str(tmp_path))
+    assert _names(sort_image_paths(paths)) == ["DSC_0001.jpg", "DSC_9999.jpg", "DSC_10000.jpg"]
+
+
+def test_sort_by_mtime_follows_file_dates_not_names(tmp_path):
+    base = 1_700_000_000
+    for offset, name in [(300, "DSC_0001.jpg"), (100, "DSC_9999.jpg"), (200, "DSC_0002.jpg")]:
+        path = tmp_path / name
+        path.write_bytes(b"x")
+        os.utime(path, (base + offset, base + offset))
+    paths = find_images(str(tmp_path))
+    assert _names(sort_image_paths(paths, SORT_MTIME)) == ["DSC_9999.jpg", "DSC_0002.jpg", "DSC_0001.jpg"]
+
+
+def test_sort_by_exif_fixes_counter_rollover(tmp_path):
+    # Filenames wrap around (DSC_9999 is the first shot), so name order is wrong.
+    _write_jpg(tmp_path / "DSC_0001.jpg", "2024:05:01 20:00:03")
+    _write_jpg(tmp_path / "DSC_9999.jpg", "2024:05:01 20:00:01")
+    _write_jpg(tmp_path / "DSC_0002.jpg", "2024:05:01 20:00:02")
+    paths = find_images(str(tmp_path))
+    assert _names(sort_image_paths(paths, SORT_EXIF)) == ["DSC_9999.jpg", "DSC_0002.jpg", "DSC_0001.jpg"]
+
+
+def test_sort_by_exif_uses_subsecond_precision_for_bursts(tmp_path):
+    _write_jpg(tmp_path / "a.jpg", "2024:05:01 20:00:00", subsec="75")
+    _write_jpg(tmp_path / "b.jpg", "2024:05:01 20:00:00", subsec="25")
+    paths = find_images(str(tmp_path))
+    assert _names(sort_image_paths(paths, SORT_EXIF)) == ["b.jpg", "a.jpg"]
+
+
+def test_sort_by_exif_falls_back_to_mtime_without_exif(tmp_path):
+    _write_jpg(tmp_path / "with_exif.jpg", "2024:05:01 20:00:05")
+    _write_jpg(tmp_path / "no_exif.jpg")  # no DateTimeOriginal
+    os.utime(tmp_path / "no_exif.jpg", (1_000_000_000, 1_000_000_000))  # very old mtime
+    paths = find_images(str(tmp_path))
+    assert _names(sort_image_paths(paths, SORT_EXIF)) == ["no_exif.jpg", "with_exif.jpg"]
+
+
+def test_read_exif_datetime_handles_placeholder_and_missing(tmp_path):
+    pytest.importorskip("PIL.Image")
+    from timelapse_core import read_exif_datetime
+
+    _write_jpg(tmp_path / "zero.jpg", "0000:00:00 00:00:00")
+    _write_jpg(tmp_path / "plain.jpg")
+    assert read_exif_datetime(str(tmp_path / "zero.jpg")) is None
+    assert read_exif_datetime(str(tmp_path / "plain.jpg")) is None
+    _write_jpg(tmp_path / "ok.jpg", "2024:05:01 19:22:33")
+    assert read_exif_datetime(str(tmp_path / "ok.jpg")) == datetime(2024, 5, 1, 19, 22, 33)
+
+
+def test_sort_unknown_mode_raises(tmp_path):
+    with pytest.raises(ValueError):
+        sort_image_paths([], "random")
