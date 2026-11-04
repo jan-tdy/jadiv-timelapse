@@ -1,110 +1,25 @@
 import sys
-import os
-import glob
 import re
 import json
-import shutil
-import tempfile
-import subprocess
-import threading
 import urllib.request
 import urllib.error
 import webbrowser
-import cv2
-import numpy as np
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QComboBox,
                              QSpinBox, QProgressBar, QFileDialog, QMessageBox,
                              QCheckBox)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
-from timelapse_core import natural_sort_key, compute_target_resolution, compute_letterbox_layout
+from timelapse_core import SORT_NAME, SORT_EXIF, SORT_MTIME
+from timelapse_render import TimelapseCancelled, TimelapseError, render_timelapse
 
-APP_VERSION = "1.12.1"
+APP_VERSION = "1.13.0"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 # --nomark sets the default state of the watermark toggle in the UI to off (it can still
 # be switched back on in the window - --nomark only changes the default value at startup)
 SKIP_WATERMARK = "--nomark" in sys.argv
-
-OUTRO_DURATION_SECONDS = 4
-OUTRO_LINE1 = "Made by Jadiv-Timelapse"
-OUTRO_LINE2 = "Simple timelapse creation - no command-line needed"
-OUTRO_LINE3 = f"If you like this, star us on GitHub: github.com/{GITHUB_REPO}"
-
-# (text, font_scale multiplier, thickness multiplier, color) - font_scale/thickness are
-# scaled to the target resolution (reference 720p); sizes are 3x the original watermark
-OUTRO_LINES = (
-    (OUTRO_LINE1, 3.3, 6, (255, 255, 255)),
-    (OUTRO_LINE2, 1.5, 3, (220, 220, 220)),
-    (OUTRO_LINE3, 1.2, 2, (170, 170, 170)),
-)
-
-
-def build_outro_frame(width, height):
-    """A black frame with the watermark, appended to the end of the video (project promo)."""
-    frame = np.zeros((height, width, 3), dtype=np.uint8)
-    scale = height / 720
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    gap = int(round(20 * scale))
-    max_text_width = int(width * 0.92)
-
-    rendered = []
-    for text, font_scale_mult, thickness_mult, color in OUTRO_LINES:
-        font_scale = max(font_scale_mult * scale, font_scale_mult * 0.25)
-        thickness = max(int(round(thickness_mult * scale)), 1)
-        (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
-
-        # At low resolutions (e.g. 240p) the longer line might not fit the width -
-        # in that case shrink the font further so the text isn't shown cropped
-        if text_w > max_text_width:
-            shrink = max_text_width / text_w
-            font_scale = max(font_scale * shrink, 0.3)
-            thickness = max(int(round(thickness * shrink)), 1)
-            (text_w, text_h), baseline = cv2.getTextSize(text, font, font_scale, thickness)
-
-        rendered.append((text, font_scale, thickness, color, text_w, text_h + baseline))
-
-    total_height = sum(r[5] for r in rendered) + gap * (len(rendered) - 1)
-    y = int(height / 2 - total_height / 2)
-    for text, font_scale, thickness, color, text_w, line_height in rendered:
-        y += line_height
-        x = max((width - text_w) // 2, 0)
-        cv2.putText(frame, text, (x, y), font, font_scale, color, thickness, cv2.LINE_AA)
-        y += gap
-    return frame
-
-
-def imread_unicode(path):
-    """cv2.imread() fails (returns None) on Windows if the path contains accented characters;
-    the workaround is np.fromfile + cv2.imdecode, which open the path in a unicode-safe way."""
-    try:
-        data = np.fromfile(path, dtype=np.uint8)
-    except OSError:
-        return None
-    if data.size == 0:
-        return None
-    return cv2.imdecode(data, cv2.IMREAD_COLOR)
-
-
-def letterbox_resize(img, target_width, target_height):
-    """Scales a photo down while preserving its aspect ratio so it fits entirely within the
-    target resolution, and pads the rest of the canvas with black bars (letterbox/pillarbox).
-
-    The target resolution is computed from the aspect ratio of the first photo in the
-    folder - without this, other photos with a different aspect ratio (e.g. a folder mixing
-    portrait/landscape shots) would be stretched/distorted by a direct cv2.resize() to those
-    dimensions instead of being framed.
-    """
-    src_height, src_width = img.shape[:2]
-    new_width, new_height, x_offset, y_offset = compute_letterbox_layout(
-        src_width, src_height, target_width, target_height
-    )
-    resized = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
-    canvas = np.zeros((target_height, target_width, 3), dtype=np.uint8)
-    canvas[y_offset:y_offset + new_height, x_offset:x_offset + new_width] = resized
-    return canvas
 
 
 def _version_tuple(version):
@@ -113,87 +28,11 @@ def _version_tuple(version):
     return tuple(int(p) for p in parts) if parts else (0,)
 
 
-class FfmpegVideoWriter:
-    """
-    Writes the video via the system's FFmpeg using the H.264 codec.
-    OpenCV's pip package can't encode H.264 (only MPEG-4 "mp4v"), whose output mobile apps
-    and e.g. Instagram won't play/accept - so instead of cv2.VideoWriter, the actual video
-    encoding uses FFmpeg, which frames are streamed to over a pipe.
-    """
-
-    def __init__(self, output_file, fps, size):
-        width, height = size
-        ffmpeg_exe = shutil.which("ffmpeg")
-        if ffmpeg_exe is None:
-            raise FileNotFoundError(
-                "FFmpeg was not found in PATH. Install it (e.g. 'sudo apt install ffmpeg' "
-                "on Debian/Ubuntu, 'sudo dnf install ffmpeg' on Fedora, or 'brew install ffmpeg' "
-                "on macOS) and try again."
-            )
-        cmd = [
-            ffmpeg_exe, "-y",
-            "-loglevel", "error",
-            "-f", "rawvideo", "-vcodec", "rawvideo",
-            "-pix_fmt", "bgr24",
-            "-s", f"{width}x{height}",
-            "-r", str(fps),
-            "-i", "-",
-            "-an",
-            "-c:v", "libx264",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            output_file,
-        ]
-        self._process = subprocess.Popen(
-            cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
-        )
-        # FFmpeg's stderr must be drained continuously in the background: if it fills the
-        # OS pipe buffer (e.g. many warnings) while we're only reading it after all frames
-        # are written, FFmpeg blocks on its stderr write and we block on stdin.write() -
-        # a deadlock where each side waits on the other forever.
-        self._stderr_chunks = []
-        self._stderr_thread = threading.Thread(target=self._drain_stderr, daemon=True)
-        self._stderr_thread.start()
-
-    def _drain_stderr(self):
-        try:
-            for chunk in iter(lambda: self._process.stderr.read(4096), b""):
-                self._stderr_chunks.append(chunk)
-        except (ValueError, OSError):
-            pass
-
-    def write(self, frame):
-        self._process.stdin.write(frame.tobytes())
-
-    def release(self):
-        try:
-            self._process.stdin.close()
-        except OSError:
-            pass
-        self._process.wait()
-        self._stderr_thread.join()
-        self.error_output = b"".join(self._stderr_chunks).decode("utf-8", errors="replace")
-
-    def terminate(self):
-        self._process.terminate()
-        try:
-            self._process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self._process.kill()
-            self._process.wait()
-        self._stderr_thread.join(timeout=5)
-
-    @property
-    def returncode(self):
-        return self._process.returncode
-
-
 class UpdateChecker(QThread):
     """Checks GitHub for the latest release in the background (so the UI doesn't freeze) and compares it to the current version."""
     update_available = pyqtSignal(str, str)
 
     def run(self):
-        tmp_output_file = None
         try:
             request = urllib.request.Request(
                 GITHUB_LATEST_RELEASE_API,
@@ -215,18 +54,20 @@ class UpdateChecker(QThread):
 class VideoWorker(QThread):
     """
     Worker thread for video processing, so the main window (GUI) doesn't freeze.
+    The rendering itself lives in timelapse_render.render_timelapse().
     """
     progress_update = pyqtSignal(int, str)
     finished = pyqtSignal(bool, str)
     cancelled = pyqtSignal(str)
 
-    def __init__(self, input_folder, output_file, fps, resolution_choice, add_watermark=True):
+    def __init__(self, input_folder, output_file, fps, resolution_choice, add_watermark=True, sort_mode=SORT_NAME):
         super().__init__()
         self.input_folder = input_folder
         self.output_file = output_file
         self.fps = fps
         self.resolution_choice = resolution_choice
         self.add_watermark = add_watermark
+        self.sort_mode = sort_mode
         self._cancel_requested = False
 
     def cancel(self):
@@ -234,117 +75,23 @@ class VideoWorker(QThread):
 
     def run(self):
         try:
-            # Also look for large JPGs from Nikon cameras
-            extensions = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
-            images = set()
-            for ext in extensions:
-                images.update(glob.glob(glob.escape(self.input_folder) + ext))
-
-            # Sort by the numbers in the file name (e.g. 2 before 10), not purely alphabetically;
-            # the set() above also removes duplicates (on Windows/macOS "*.jpg" and "*.JPG" would
-            # otherwise match the same files twice)
-            images = sorted(images, key=natural_sort_key)
-
-            if not images:
-                self.finished.emit(False, "Error: No images were found in the selected folder.")
-                return
-
-            # Determine video dimensions from the first image
-            first_frame = imread_unicode(images[0])
-            if first_frame is None:
-                self.finished.emit(False, "Error: The first image is corrupted and could not be loaded.")
-                return
-
-            # shape[:2] works for both color and grayscale images
-            height, width = first_frame.shape[:2]
-
-            # Compute the new resolution (preserving aspect ratio, even numbers for codecs)
-            target_width, target_height = compute_target_resolution(width, height, self.resolution_choice)
-
-            # Write beside the destination, then atomically replace it on success so
-            # a failed render never truncates an existing video.
-            output_dir = os.path.dirname(os.path.abspath(self.output_file))
-            fd, tmp_output_file = tempfile.mkstemp(
-                prefix=".timelapse-", suffix=os.path.splitext(self.output_file)[1] or ".mp4",
-                dir=output_dir,
+            render_timelapse(
+                self.input_folder, self.output_file, self.fps, self.resolution_choice,
+                add_watermark=self.add_watermark,
+                sort_mode=self.sort_mode,
+                on_progress=self.progress_update.emit,
+                is_cancelled=lambda: self._cancel_requested,
             )
-            os.close(fd)
-
-            # Initialize the video writer (FFmpeg / H.264)
-            try:
-                video = FfmpegVideoWriter(tmp_output_file, self.fps, (target_width, target_height))
-            except OSError as e:
-                self.finished.emit(False, f"Error: Failed to start FFmpeg to create the video.\n{e}")
-                return
-
-            was_cancelled = False
-            write_failed = False
-            try:
-                total_images = len(images)
-                for i, image_path in enumerate(images):
-                    if self._cancel_requested:
-                        was_cancelled = True
-                        break
-
-                    img = imread_unicode(image_path)
-                    if img is None:
-                        continue
-
-                    # Scale down while preserving aspect ratio and framing (INTER_AREA is
-                    # best for downscaling quality)
-                    if img.shape[:2] != (target_height, target_width):
-                        img = letterbox_resize(img, target_width, target_height)
-
-                    try:
-                        video.write(img)
-                    except (BrokenPipeError, OSError):
-                        write_failed = True
-                        break
-
-                    # Update the progress bar and status text
-                    progress_percent = int(((i + 1) / total_images) * 100)
-                    status_text = f"Processed: {i + 1} / {total_images}"
-                    self.progress_update.emit(progress_percent, status_text)
-
-                # Watermark at the end of the video (project promo) - only if processing
-                # completed successfully, not on cancellation or a write failure
-                if not was_cancelled and not write_failed and self.add_watermark:
-                    self.progress_update.emit(100, "Adding closing watermark...")
-                    outro_frame = build_outro_frame(target_width, target_height)
-                    outro_frame_count = max(round(self.fps * OUTRO_DURATION_SECONDS), 1)
-                    for _ in range(outro_frame_count):
-                        try:
-                            video.write(outro_frame)
-                        except (BrokenPipeError, OSError):
-                            write_failed = True
-                            break
-            finally:
-                if was_cancelled:
-                    video.terminate()
-                else:
-                    video.release()
-
-            if was_cancelled:
-                self.cancelled.emit("Processing was cancelled.")
-                return
-
-            if write_failed or video.returncode != 0:
-                self.finished.emit(False, f"Error: FFmpeg failed while creating the video.\n{video.error_output}")
-                return
-
-            # Publish only a complete video, preserving any previous output on failure.
-            os.replace(tmp_output_file, self.output_file)
-            tmp_output_file = None
-            self.finished.emit(True, "The video was created and saved successfully!")
-
+        except TimelapseCancelled as e:
+            self.cancelled.emit(str(e))
+            return
+        except TimelapseError as e:
+            self.finished.emit(False, str(e))
+            return
         except Exception as e:
             self.finished.emit(False, f"An error occurred during generation:\n{str(e)}")
-        finally:
-            if tmp_output_file and os.path.exists(tmp_output_file):
-                try:
-                    os.remove(tmp_output_file)
-                except OSError:
-                    pass
+            return
+        self.finished.emit(True, "The video was created and saved successfully!")
 
 
 class TimelapseApp(QWidget):
@@ -354,8 +101,8 @@ class TimelapseApp(QWidget):
         self.check_for_updates()
 
     def initUI(self):
-        self.setWindowTitle("Jadiv-Timelapse Plus version(by JapySoft TDY)")
-        self.resize(650, 400)
+        self.setWindowTitle("Jadiv-Timelapse Plus")
+        self.resize(650, 440)
 
         # Apply a modern dark mode CSS style
         self.setStyleSheet("""
@@ -491,6 +238,18 @@ class TimelapseApp(QWidget):
         settings_layout.addWidget(self.resolution_combo, 1) # stretches to fill
         main_layout.addLayout(settings_layout)
 
+        # Frame order: file name (default), EXIF capture time, or file modification time
+        sort_layout = QHBoxLayout()
+        sort_label = QLabel("Sort photos by:")
+        sort_label.setFixedWidth(140)
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItem("File name (default)", SORT_NAME)
+        self.sort_combo.addItem("EXIF capture date (DateTimeOriginal)", SORT_EXIF)
+        self.sort_combo.addItem("File modification date", SORT_MTIME)
+        sort_layout.addWidget(sort_label)
+        sort_layout.addWidget(self.sort_combo, 1)
+        main_layout.addLayout(sort_layout)
+
         # Closing watermark toggle (default follows the --nomark startup flag)
         self.watermark_checkbox = QCheckBox("Add closing watermark (4s, Jadiv-Timelapse promo)")
         self.watermark_checkbox.setChecked(not SKIP_WATERMARK)
@@ -586,6 +345,7 @@ class TimelapseApp(QWidget):
         self.output_file_entry.setEnabled(False)
         self.fps_spinbox.setEnabled(False)
         self.resolution_combo.setEnabled(False)
+        self.sort_combo.setEnabled(False)
         self.watermark_checkbox.setEnabled(False)
 
         self.progress_bar.setValue(0)
@@ -596,8 +356,9 @@ class TimelapseApp(QWidget):
         fps = self.fps_spinbox.value()
         resolution = self.resolution_combo.currentText()
         add_watermark = self.watermark_checkbox.isChecked()
+        sort_mode = self.sort_combo.currentData()
 
-        self.worker = VideoWorker(in_folder, out_file, fps, resolution, add_watermark)
+        self.worker = VideoWorker(in_folder, out_file, fps, resolution, add_watermark, sort_mode)
         self.worker.progress_update.connect(self.update_progress)
         self.worker.finished.connect(self.processing_finished)
         self.worker.cancelled.connect(self.processing_cancelled)
@@ -621,6 +382,7 @@ class TimelapseApp(QWidget):
         self.output_file_entry.setEnabled(True)
         self.fps_spinbox.setEnabled(True)
         self.resolution_combo.setEnabled(True)
+        self.sort_combo.setEnabled(True)
         self.watermark_checkbox.setEnabled(True)
 
     def processing_finished(self, success, message):

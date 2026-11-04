@@ -24,6 +24,7 @@ The project contains three independent variants with the same functionality — 
 
 - Create a timelapse video from `.jpg` / `.jpeg` / `.png` photos (including large JPGs from cameras)
 - Adjustable frame rate (FPS)
+- Choose the frame order: file name (default), EXIF capture date, or file modification date - useful when camera file names wrap around (e.g. `DSC_9999` → `DSC_0001`) or the folder mixes prefixes
 - Optional target resolution (4K, Full HD, HD, SD, low quality, or original resolution) with aspect ratio preserved
 - Photos with a different aspect ratio than the first one (e.g. a folder mixing portrait and landscape shots) are letterboxed/pillarboxed onto the target resolution instead of being stretched/distorted (desktop `_plus` version and web version; the unmaintained legacy Tkinter version still stretches them)
 - Shows processing progress and lets you cancel processing at any time
@@ -71,6 +72,24 @@ sudo apt install python3-tk
 
 ## Usage
 
+### Headless command-line version
+
+For overnight/observatory automation, `jadiv-timelapse_cli.py` runs without any GUI:
+
+```bash
+python3 jadiv-timelapse_cli.py ~/photos/night1 ~/videos/night1.mp4 --fps 24 --resolution fullhd --sort exif
+```
+
+| Option | Meaning |
+|---|---|
+| `--fps N` | frames per second, 1–120 (default 24) |
+| `--resolution` | `4k`, `fullhd` (default), `720p`, `480p`, `240p`, `original` |
+| `--sort` | `name` (default), `exif` (capture date, falls back to file date), `mtime` (file date) |
+| `--no-watermark` | do not append the closing watermark |
+| `-q` / `--quiet` | print only errors |
+
+Exit codes: `0` success, `1` rendering failed, `130` interrupted with Ctrl+C. The output must be an `.mp4` file.
+
 ### Desktop Plus version (PyQt5) — recommended
 
 ```bash
@@ -100,16 +119,17 @@ Processing can be interrupted at any time with the **Cancel** button (**Zrušiť
 
 ## Notes
 
-- Photos are sorted by file name using natural (numeric) sorting — so `frame2.jpg` sorts before `frame10.jpg`, even without leading zeros in the number. It's still worth using a consistent naming format (e.g. `IMG_0001.jpg`, `IMG_0002.jpg`, ...).
+- By default, photos are sorted by file name using natural (numeric) sorting — so `frame2.jpg` sorts before `frame10.jpg`, even without leading zeros in the number. It's still worth using a consistent naming format (e.g. `IMG_0001.jpg`, `IMG_0002.jpg`, ...).
+- The **Sort photos by** option (or `--sort` in the CLI) switches to the EXIF capture time (`DateTimeOriginal`, with sub-second precision when the camera writes it) or the file modification time. Photos without a capture time (e.g. PNGs) fall back to their file modification time. EXIF sorting needs Pillow, which is included in `requirements.txt`.
 - Corrupted or unreadable photos are skipped during processing and are not included in the video.
 - MP4/WebM codecs require an even width and height for the video — the tool handles this automatically.
 
 ## Testing
 
-The natural-sort and resolution/aspect-ratio math shared by all three variants lives in a single testable place per variant: `timelapse_core.py` (used by both `.py` GUIs) and `docs/resolution.js` (used by the web version).
+The sorting and resolution/aspect-ratio math shared by the desktop variants lives in `timelapse_core.py` (GUI-free); the rendering pipeline shared by the Plus GUI and the CLI lives in `timelapse_render.py`; the web version uses `docs/resolution.js`.
 
 ```bash
-# Python (both desktop variants)
+# Python (desktop variants, CLI)
 pip install -r requirements-dev.txt
 pytest
 

@@ -2,13 +2,20 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import cv2
 import numpy as np
-import glob
 import threading
 import os
 import tempfile
 import shutil
 
-from timelapse_core import natural_sort_key, compute_target_resolution, compute_letterbox_layout
+from timelapse_core import (compute_target_resolution, compute_letterbox_layout,
+                            find_images, sort_image_paths, SORT_NAME, SORT_EXIF, SORT_MTIME)
+
+# (label, mode) pairs for the "Sort by" combobox
+SORT_OPTIONS = [
+    ("Názov súboru", SORT_NAME),
+    ("Dátum z EXIF (kedy bola fotka urobená)", SORT_EXIF),
+    ("Dátum úpravy súboru", SORT_MTIME),
+]
 
 
 def imread_unicode(path):
@@ -38,8 +45,8 @@ def letterbox_resize(img, target_width, target_height):
 class TimelapseApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Jadiv-Timelapse code by JapySoft TDY")
-        self.root.geometry("600x360")
+        self.root.title("Jadiv-Timelapse")
+        self.root.geometry("600x410")
         self.root.resizable(False, False)
         
         # Nastavenie štýlu pre modernejší vzhľad
@@ -51,6 +58,7 @@ class TimelapseApp:
         self.output_file = tk.StringVar()
         self.fps = tk.IntVar(value=24)
         self.resolution = tk.StringVar(value="Full HD (Plynulé prehrávanie)")
+        self.sort_label = tk.StringVar(value=SORT_OPTIONS[0][0])
 
         # Stav spracovania (ochrana proti opätovnému spusteniu a možnosť zrušenia)
         self.is_processing = False
@@ -99,17 +107,22 @@ class TimelapseApp:
         ]
         ttk.Combobox(frame, textvariable=self.resolution, values=resolutions, state="readonly", width=37).grid(row=4, column=1, padx=10, pady=5, sticky=tk.W)
 
-        # 5. Riadok: Progress bar
+        # 5. Riadok: Poradie snímok
+        ttk.Label(frame, text="Zoradiť fotky podľa:").grid(row=5, column=0, sticky=tk.W, pady=5)
+        ttk.Combobox(frame, textvariable=self.sort_label, values=[label for label, _ in SORT_OPTIONS],
+                     state="readonly", width=37).grid(row=5, column=1, padx=10, pady=5, sticky=tk.W)
+
+        # 6. Riadok: Progress bar
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(frame, variable=self.progress_var, maximum=100)
-        self.progress_bar.grid(row=5, column=0, columnspan=3, sticky=tk.EW, pady=(20, 10))
+        self.progress_bar.grid(row=6, column=0, columnspan=3, sticky=tk.EW, pady=(20, 10))
         
         self.status_label = ttk.Label(frame, text="Pripravený", foreground="gray")
-        self.status_label.grid(row=6, column=0, columnspan=3)
+        self.status_label.grid(row=7, column=0, columnspan=3)
 
-        # 6. Riadok: Tlačidlá ŠTART a Zrušiť
+        # 7. Riadok: Tlačidlá ŠTART a Zrušiť
         btn_frame = ttk.Frame(frame)
-        btn_frame.grid(row=7, column=0, columnspan=3, pady=(15, 0))
+        btn_frame.grid(row=8, column=0, columnspan=3, pady=(15, 0))
 
         self.start_btn = ttk.Button(btn_frame, text="VYTVORIŤ TIMELAPSE", command=self.start_processing)
         self.start_btn.pack(side=tk.LEFT, ipadx=20, ipady=5)
@@ -146,6 +159,7 @@ class TimelapseApp:
         try:
             fps = self.fps.get()
             resolution = self.resolution.get()
+            sort_mode = dict((label, mode) for label, mode in SORT_OPTIONS)[self.sort_label.get()]
             if fps <= 0:
                 raise ValueError("FPS musí byť kladné číslo.")
         except (tk.TclError, ValueError) as e:
@@ -161,7 +175,7 @@ class TimelapseApp:
         self.status_label.config(text="Spracovávam...", foreground="blue")
 
         # Spustíme spracovanie v novom vlákne (aby nezamrzlo UI okno)
-        thread = threading.Thread(target=self.process_video, args=(in_folder, out_file, fps, resolution))
+        thread = threading.Thread(target=self.process_video, args=(in_folder, out_file, fps, resolution, sort_mode))
         thread.daemon = True
         thread.start()
 
@@ -170,18 +184,12 @@ class TimelapseApp:
         self.cancel_btn.config(state=tk.DISABLED)
         self.status_label.config(text="Rušenie...", foreground="orange")
 
-    def process_video(self, input_folder, output_file, fps, resolution_choice):
+    def process_video(self, input_folder, output_file, fps, resolution_choice, sort_mode=SORT_NAME):
         tmp_output_path = None
         try:
-            # Hľadáme aj veľké JPG z Nikonu
-            extensions = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
-            images = set()
-            for ext in extensions:
-                images.update(glob.glob(glob.escape(input_folder) + ext))
-
-            # Zoradenie podľa čísel v názve (napr. 2 pred 10), nie čisto abecedne;
-            # set() vyššie zároveň odstráni duplicity (na Windows/macOS by "*.jpg" a "*.JPG" inak našli tie isté súbory dvakrát)
-            images = sorted(images, key=natural_sort_key)
+            # Hľadáme aj veľké JPG z Nikonu (duplicity odstraňuje find_images)
+            # a zoradíme ich podľa zvoleného režimu (názov, EXIF dátum, dátum úpravy)
+            images = sort_image_paths(find_images(input_folder), sort_mode)
 
             if not images:
                 self.root.after(0, self.finish_processing, "Chyba: Nenašli sa žiadne obrázky.", False)

@@ -1,13 +1,106 @@
 """Shared, testable logic used by both desktop GUI variants
-(jadiv-timelapse.py and jadiv-timelapse_plus.py): natural sorting of files
-by name and computing the target video resolution while preserving aspect ratio.
+(jadiv-timelapse.py and jadiv-timelapse_plus.py), the headless CLI
+(jadiv-timelapse_cli.py) and the rendering module (timelapse_render.py):
+finding photos, sorting them (by name, EXIF capture time or file modification
+time), and computing the target video resolution while preserving aspect ratio.
+
+This module must stay free of GUI and OpenCV/FFmpeg dependencies so it can be
+tested anywhere. Pillow is imported lazily, only when EXIF sorting is requested.
 """
+import glob
+import os
 import re
+from datetime import datetime
+
+SORT_NAME = "name"
+SORT_EXIF = "exif"
+SORT_MTIME = "mtime"
+SORT_MODES = (SORT_NAME, SORT_EXIF, SORT_MTIME)
+
+IMAGE_PATTERNS = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
+
+# EXIF tag ids (see the EXIF 2.3 spec); DateTimeOriginal lives in the Exif sub-IFD
+_EXIF_IFD_POINTER = 0x8769
+_TAG_DATETIME_ORIGINAL = 0x9003
+_TAG_SUBSEC_TIME_ORIGINAL = 0x9291
+_EXIF_DATETIME_FORMAT = "%Y:%m:%d %H:%M:%S"
 
 
 def natural_sort_key(path):
     """Splits a path into text/number chunks so photos sort numerically (e.g. 2 before 10), not purely alphabetically."""
     return [int(part) if part.isdigit() else part.lower() for part in re.split(r'(\d+)', path)]
+
+
+def find_images(folder):
+    """Returns the paths of all .jpg/.jpeg/.png photos in `folder` (unsorted, no duplicates).
+
+    The set() also removes duplicates: on Windows/macOS "*.jpg" and "*.JPG" would otherwise
+    match the same files twice.
+    """
+    images = set()
+    for pattern in IMAGE_PATTERNS:
+        images.update(glob.glob(glob.escape(folder) + pattern))
+    return list(images)
+
+
+def read_exif_datetime(path):
+    """Returns the EXIF DateTimeOriginal (capture time) of a photo as a naive local datetime,
+    including sub-second precision from SubSecTimeOriginal when the camera wrote it.
+
+    Returns None if the file has no usable capture time (e.g. PNG, stripped metadata, unreadable
+    file). Raises ImportError if Pillow is not installed.
+    """
+    from PIL import Image  # ImportError propagates: EXIF sorting needs Pillow
+
+    try:
+        with Image.open(path) as img:
+            exif = img.getexif()
+            exif_ifd = exif.get_ifd(_EXIF_IFD_POINTER)
+            raw = exif_ifd.get(_TAG_DATETIME_ORIGINAL)
+            subsec = exif_ifd.get(_TAG_SUBSEC_TIME_ORIGINAL)
+    except Exception:
+        return None
+
+    if not raw:
+        return None
+    try:
+        captured = datetime.strptime(str(raw).strip(), _EXIF_DATETIME_FORMAT)
+    except ValueError:
+        # e.g. the camera's "0000:00:00 00:00:00" placeholder
+        return None
+
+    digits = str(subsec or "").strip()
+    if digits.isdigit():
+        # SubSecTimeOriginal holds the fraction as digits, e.g. "25" means 0.25 s
+        captured = captured.replace(microsecond=int((digits + "000000")[:6]))
+    return captured
+
+
+def _file_mtime(path):
+    return datetime.fromtimestamp(os.path.getmtime(path))
+
+
+def sort_image_paths(paths, sort_mode=SORT_NAME):
+    """Returns `paths` in frame order for the given `sort_mode`:
+
+    - SORT_NAME: natural sort of the full path (frame2 before frame10).
+    - SORT_EXIF: EXIF DateTimeOriginal (capture time). Photos without one fall back to their
+      file modification time, so mixed folders still get a sensible order.
+    - SORT_MTIME: file modification time.
+
+    Ties (e.g. a burst of shots within the same second) are broken by natural name order,
+    so the result is deterministic.
+    """
+    if sort_mode == SORT_NAME:
+        return sorted(paths, key=natural_sort_key)
+    if sort_mode == SORT_EXIF:
+        def time_of(path):
+            return read_exif_datetime(path) or _file_mtime(path)
+    elif sort_mode == SORT_MTIME:
+        time_of = _file_mtime
+    else:
+        raise ValueError(f"Unknown sort mode: {sort_mode!r} (expected one of {', '.join(SORT_MODES)})")
+    return sorted(paths, key=lambda path: (time_of(path), natural_sort_key(path)))
 
 
 def compute_target_resolution(width, height, resolution_choice):
