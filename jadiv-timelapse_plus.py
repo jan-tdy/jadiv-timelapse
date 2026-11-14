@@ -11,9 +11,10 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 
 from timelapse_core import SORT_NAME, SORT_EXIF, SORT_MTIME
-from timelapse_render import TimelapseCancelled, TimelapseError, render_timelapse
+from timelapse_render import (TimelapseCancelled, TimelapseError, render_timelapse,
+                              skipped_frames_message)
 
-APP_VERSION = "1.13.0"
+APP_VERSION = "1.13.1"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -75,7 +76,7 @@ class VideoWorker(QThread):
 
     def run(self):
         try:
-            render_timelapse(
+            result = render_timelapse(
                 self.input_folder, self.output_file, self.fps, self.resolution_choice,
                 add_watermark=self.add_watermark,
                 sort_mode=self.sort_mode,
@@ -91,7 +92,11 @@ class VideoWorker(QThread):
         except Exception as e:
             self.finished.emit(False, f"An error occurred during generation:\n{str(e)}")
             return
-        self.finished.emit(True, "The video was created and saved successfully!")
+        message = "The video was created and saved successfully!"
+        skipped_note = skipped_frames_message(result)
+        if skipped_note:
+            message += "\n\n" + skipped_note
+        self.finished.emit(True, message)
 
 
 class TimelapseApp(QWidget):

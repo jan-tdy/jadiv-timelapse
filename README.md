@@ -121,7 +121,7 @@ Processing can be interrupted at any time with the **Cancel** button (**Zrušiť
 
 - By default, photos are sorted by file name using natural (numeric) sorting — so `frame2.jpg` sorts before `frame10.jpg`, even without leading zeros in the number. It's still worth using a consistent naming format (e.g. `IMG_0001.jpg`, `IMG_0002.jpg`, ...).
 - The **Sort photos by** option (or `--sort` in the CLI) switches to the EXIF capture time (`DateTimeOriginal`, with sub-second precision when the camera writes it) or the file modification time. Photos without a capture time (e.g. PNGs) fall back to their file modification time. EXIF sorting needs Pillow, which is included in `requirements.txt`.
-- Corrupted or unreadable photos are skipped during processing and are not included in the video.
+- Corrupted or unreadable photos are skipped during processing and are not included in the video. When rendering finishes, the app lists how many photos were skipped and which ones (the CLI prints a warning). If none of the photos can be read, no video is created.
 - MP4/WebM codecs require an even width and height for the video — the tool handles this automatically.
 
 ## Testing
