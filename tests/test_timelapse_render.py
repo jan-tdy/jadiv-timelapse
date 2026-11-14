@@ -1,5 +1,6 @@
 import os
 import shutil
+import stat
 
 import pytest
 
@@ -125,13 +126,67 @@ def test_ffmpeg_failure_keeps_existing_output_and_removes_partial_file(tmp_path,
     _solid(photos / "a.png", (255, 0, 0))
     out = tmp_path / "out.mp4"
     out.write_bytes(b"previous video")
+    os.chmod(out, 0o640)
     monkeypatch.setattr("timelapse_render.FfmpegVideoWriter", _FailingFfmpegWriter)
 
     with pytest.raises(TimelapseError, match="FFmpeg failed"):
         render_timelapse(str(photos), str(out), 5, "original", add_watermark=False)
 
     assert out.read_bytes() == b"previous video"
+    assert stat.S_IMODE(out.stat().st_mode) == 0o640
     assert [p.name for p in tmp_path.iterdir()] == sorted(["photos", "out.mp4"])
+
+
+class _StubFfmpegWriter:
+    """Writes a stand-in file and reports success, so mode checks do not encode video."""
+
+    def __init__(self, output_file, fps, size):
+        with open(output_file, "wb") as handle:
+            handle.write(b"video-bytes")
+        self.returncode = 0
+        self.error_output = ""
+
+    def write(self, frame):
+        pass
+
+    def release(self):
+        pass
+
+    def terminate(self):
+        pass
+
+
+def test_new_output_uses_umask_mode(tmp_path, monkeypatch):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    _solid(photos / "a.png", (255, 0, 0))
+    out = tmp_path / "out.mp4"
+    monkeypatch.setattr("timelapse_render.FfmpegVideoWriter", _StubFfmpegWriter)
+
+    # Pin the umask. A process umask of 0077 would make 0600 look correct.
+    previous = os.umask(0o022)
+    try:
+        render_timelapse(str(photos), str(out), 5, "original", add_watermark=False)
+    finally:
+        os.umask(previous)
+
+    assert stat.S_IMODE(out.stat().st_mode) == 0o644
+    assert out.read_bytes() == b"video-bytes"
+
+
+def test_replaced_output_keeps_existing_mode(tmp_path, monkeypatch):
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    _solid(photos / "a.png", (0, 255, 0))
+    out = tmp_path / "out.mp4"
+    out.write_bytes(b"previous video")
+    os.chmod(out, 0o640)
+    monkeypatch.setattr("timelapse_render.FfmpegVideoWriter", _StubFfmpegWriter)
+
+    render_timelapse(str(photos), str(out), 5, "original", add_watermark=False)
+
+    assert stat.S_IMODE(out.stat().st_mode) == 0o640
+    assert out.read_bytes() == b"video-bytes"
 
 
 def test_skipped_frames_message_lists_names_and_counts_the_rest():

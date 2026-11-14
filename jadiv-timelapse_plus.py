@@ -14,7 +14,7 @@ from timelapse_core import SORT_NAME, SORT_EXIF, SORT_MTIME
 from timelapse_render import (TimelapseCancelled, TimelapseError, render_timelapse,
                               skipped_frames_message)
 
-APP_VERSION = "1.13.1"
+APP_VERSION = "1.13.2"
 GITHUB_REPO = "jan-tdy/jadiv-timelapse"
 GITHUB_LATEST_RELEASE_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
