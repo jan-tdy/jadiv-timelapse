@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -44,6 +45,38 @@ class TimelapseError(Exception):
 
 class TimelapseCancelled(Exception):
     """Rendering was cancelled by the caller before the video was finished."""
+
+
+@dataclass(frozen=True)
+class RenderResult:
+    """Outcome of a finished render: how many photos became frames and which ones were skipped."""
+    frames_written: int
+    skipped_images: tuple
+
+    @property
+    def total_images(self):
+        return self.frames_written + len(self.skipped_images)
+
+
+SKIPPED_NAMES_SHOWN = 5
+
+
+def skipped_frames_message(result):
+    """Returns a user-facing note listing the photos that could not be read and were left out
+    of the video, or an empty string if every photo made it into the video."""
+    if not result.skipped_images:
+        return ""
+    names = [os.path.basename(path) for path in result.skipped_images[:SKIPPED_NAMES_SHOWN]]
+    more = len(result.skipped_images) - len(names)
+    listed = ", ".join(names) + (f" and {more} more" if more > 0 else "")
+    return (
+        f"{len(result.skipped_images)} of {result.total_images} photos could not be read "
+        f"and were left out of the video: {listed}."
+    )
+
+
+def _no_readable_photos_message(total_images):
+    return f"Error: None of the {total_images} photos could be read, so no video was created."
 
 
 def build_outro_frame(width, height):
@@ -199,8 +232,12 @@ def render_timelapse(input_folder, output_file, fps, resolution_choice, *,
     The video is written beside `output_file` and only moved into place once it is complete,
     so a failed or cancelled render never truncates an existing video.
 
-    Raises TimelapseError (message is user-facing), TimelapseCancelled, or OSError/ImportError
-    for unexpected failures.
+    Photos that cannot be decoded are left out of the video and counted in the returned
+    `RenderResult.skipped_images`; progress is still reported for them. If no photo can be
+    decoded at all, nothing is written and TimelapseError is raised.
+
+    Returns a RenderResult. Raises TimelapseError (message is user-facing), TimelapseCancelled,
+    or OSError/ImportError for unexpected failures.
     """
     def report(percent, text):
         if on_progress is not None:
@@ -210,10 +247,14 @@ def render_timelapse(input_folder, output_file, fps, resolution_choice, *,
     if not images:
         raise TimelapseError("Error: No images were found in the selected folder.")
 
-    # Determine video dimensions from the first image
-    first_frame = imread_unicode(images[0])
+    # Video dimensions come from the first photo (in frame order) that can be decoded
+    first_frame = None
+    for image_path in images:
+        first_frame = imread_unicode(image_path)
+        if first_frame is not None:
+            break
     if first_frame is None:
-        raise TimelapseError("Error: The first image is corrupted and could not be loaded.")
+        raise TimelapseError(_no_readable_photos_message(len(images)))
 
     # shape[:2] works for both color and grayscale images
     height, width = first_frame.shape[:2]
@@ -236,6 +277,8 @@ def render_timelapse(input_folder, output_file, fps, resolution_choice, *,
 
         was_cancelled = False
         write_failed = False
+        frames_written = 0
+        skipped_images = []
         try:
             total_images = len(images)
             for i, image_path in enumerate(images):
@@ -245,21 +288,28 @@ def render_timelapse(input_folder, output_file, fps, resolution_choice, *,
 
                 img = imread_unicode(image_path)
                 if img is None:
-                    continue
+                    # Unreadable photo: leave it out, but still count it so progress moves on
+                    skipped_images.append(image_path)
+                else:
+                    # Scale down while preserving aspect ratio and framing (INTER_AREA is
+                    # best for downscaling quality)
+                    if img.shape[:2] != (target_height, target_width):
+                        img = letterbox_resize(img, target_width, target_height)
 
-                # Scale down while preserving aspect ratio and framing (INTER_AREA is
-                # best for downscaling quality)
-                if img.shape[:2] != (target_height, target_width):
-                    img = letterbox_resize(img, target_width, target_height)
-
-                try:
-                    video.write(img)
-                except (BrokenPipeError, OSError):
-                    write_failed = True
-                    break
+                    try:
+                        video.write(img)
+                    except (BrokenPipeError, OSError):
+                        write_failed = True
+                        break
+                    frames_written += 1
 
                 progress_percent = int(((i + 1) / total_images) * 100)
                 report(progress_percent, f"Processed: {i + 1} / {total_images}")
+
+            # Every photo was unreadable (the first readable one was already checked above,
+            # so this only happens if the photos changed on disk while rendering)
+            if frames_written == 0 and not was_cancelled and not write_failed:
+                raise TimelapseError(_no_readable_photos_message(total_images))
 
             # Watermark at the end of the video (project promo) - only if processing
             # completed successfully, not on cancellation or a write failure
@@ -295,3 +345,5 @@ def render_timelapse(input_folder, output_file, fps, resolution_choice, *,
                 os.remove(tmp_output_file)
             except OSError:
                 pass
+
+    return RenderResult(frames_written, tuple(skipped_images))

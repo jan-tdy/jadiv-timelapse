@@ -12,7 +12,8 @@ import os
 import sys
 
 from timelapse_core import SORT_MODES, SORT_NAME
-from timelapse_render import TimelapseCancelled, TimelapseError, render_timelapse
+from timelapse_render import (TimelapseCancelled, TimelapseError, render_timelapse,
+                              skipped_frames_message)
 
 # CLI resolution names -> labels understood by compute_target_resolution()
 RESOLUTIONS = {
@@ -78,7 +79,7 @@ def main(argv=None):
             print(f"[{percent:3d}%] {text}", file=sys.stderr, flush=True)
 
     try:
-        render_timelapse(
+        result = render_timelapse(
             args.input_folder,
             args.output,
             args.fps,
@@ -100,6 +101,10 @@ def main(argv=None):
         print(f"An error occurred during generation:\n{e}", file=sys.stderr)
         return EXIT_FAILED
 
+    # Printed even with --quiet: the video is missing photos and the user needs to know which
+    skipped_note = skipped_frames_message(result)
+    if skipped_note:
+        print(f"Warning: {skipped_note}", file=sys.stderr)
     if not args.quiet:
         print(f"Saved: {os.path.abspath(args.output)}", file=sys.stderr)
     return EXIT_OK
