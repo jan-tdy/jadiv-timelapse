@@ -227,7 +227,11 @@ def _new_file_mode(directory):
     default ACL on that directory) without the os.umask(0) window, which would
     briefly make other threads' new files world-writable.
     """
-    probe = os.path.join(directory, f".timelapse-mode-{os.getpid()}-{threading.get_ident()}")
+    # mkstemp only supplies a unique name. Recreate the probe at 0o666 so the
+    # kernel applies the umask. A leftover from an earlier run has a different name.
+    fd, probe = tempfile.mkstemp(prefix=".timelapse-mode-", dir=directory)
+    os.close(fd)
+    os.remove(probe)
     fd = os.open(probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
     try:
         return stat.S_IMODE(os.fstat(fd).st_mode)
