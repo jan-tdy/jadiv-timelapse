@@ -133,7 +133,8 @@ def test_ffmpeg_failure_keeps_existing_output_and_removes_partial_file(tmp_path,
         render_timelapse(str(photos), str(out), 5, "original", add_watermark=False)
 
     assert out.read_bytes() == b"previous video"
-    assert stat.S_IMODE(out.stat().st_mode) == 0o640
+    if os.name == "posix":
+        assert stat.S_IMODE(out.stat().st_mode) == 0o640
     assert [p.name for p in tmp_path.iterdir()] == sorted(["photos", "out.mp4"])
 
 
@@ -170,7 +171,8 @@ def test_new_output_uses_umask_mode(tmp_path, monkeypatch):
     finally:
         os.umask(previous)
 
-    assert stat.S_IMODE(out.stat().st_mode) == 0o644
+    if os.name == "posix":
+        assert stat.S_IMODE(out.stat().st_mode) == 0o644
     assert out.read_bytes() == b"video-bytes"
 
 
@@ -185,7 +187,8 @@ def test_replaced_output_keeps_existing_mode(tmp_path, monkeypatch):
 
     render_timelapse(str(photos), str(out), 5, "original", add_watermark=False)
 
-    assert stat.S_IMODE(out.stat().st_mode) == 0o640
+    if os.name == "posix":
+        assert stat.S_IMODE(out.stat().st_mode) == 0o640
     assert out.read_bytes() == b"video-bytes"
 
 
