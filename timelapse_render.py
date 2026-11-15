@@ -8,6 +8,7 @@ cancellation is polled through a callable.
 """
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import threading
@@ -219,6 +220,43 @@ class FfmpegVideoWriter:
         return self._process.returncode
 
 
+def _new_file_mode(directory):
+    """Permission bits a normal open(..., 0o666) would get in `directory`.
+
+    Creating a probe file lets the kernel apply the process umask (and any
+    default ACL on that directory) without the os.umask(0) window, which would
+    briefly make other threads' new files world-writable.
+    """
+    # mkstemp only supplies a unique name. Recreate the probe at 0o666 so the
+    # kernel applies the umask. A leftover from an earlier run has a different name.
+    fd, probe = tempfile.mkstemp(prefix=".timelapse-mode-", dir=directory)
+    os.close(fd)
+    os.remove(probe)
+    fd = os.open(probe, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
+    try:
+        return stat.S_IMODE(os.fstat(fd).st_mode)
+    finally:
+        os.close(fd)
+        try:
+            os.remove(probe)
+        except OSError:
+            pass
+
+
+def _published_file_mode(output_file):
+    """Permission bits for the video published by os.replace.
+
+    tempfile.mkstemp creates the temporary file as 0o600, and os.replace keeps
+    that inode. Without an explicit mode, a new video stays owner-only and
+    replacing an existing video drops its permission bits. A new file follows
+    the same mode as a normal create. An existing file keeps its permission bits.
+    """
+    try:
+        return stat.S_IMODE(os.stat(output_file).st_mode)
+    except FileNotFoundError:
+        return _new_file_mode(os.path.dirname(os.path.abspath(output_file)))
+
+
 def render_timelapse(input_folder, output_file, fps, resolution_choice, *,
                      add_watermark=True, sort_mode="name", on_progress=None, is_cancelled=None):
     """Renders the photos in `input_folder` into the video `output_file`.
@@ -337,6 +375,8 @@ def render_timelapse(input_folder, output_file, fps, resolution_choice, *,
             raise TimelapseError(f"Error: FFmpeg failed while creating the video.\n{video.error_output}")
 
         # Publish only a complete video, preserving any previous output on failure.
+        # Apply the mode on the temp inode first: replace keeps that inode's mode.
+        os.chmod(tmp_output_file, _published_file_mode(output_file))
         os.replace(tmp_output_file, output_file)
         tmp_output_file = None
     finally:
