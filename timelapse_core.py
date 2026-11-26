@@ -7,7 +7,6 @@ time), and computing the target video resolution while preserving aspect ratio.
 This module must stay free of GUI and OpenCV/FFmpeg dependencies so it can be
 tested anywhere. Pillow is imported lazily, only when EXIF sorting is requested.
 """
-import glob
 import os
 import re
 from datetime import datetime
@@ -17,7 +16,6 @@ SORT_EXIF = "exif"
 SORT_MTIME = "mtime"
 SORT_MODES = (SORT_NAME, SORT_EXIF, SORT_MTIME)
 
-IMAGE_PATTERNS = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
 
 # EXIF tag ids (see the EXIF 2.3 spec); DateTimeOriginal lives in the Exif sub-IFD
 _EXIF_IFD_POINTER = 0x8769
