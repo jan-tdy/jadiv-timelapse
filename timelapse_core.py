@@ -32,15 +32,14 @@ def natural_sort_key(path):
 
 
 def find_images(folder):
-    """Returns the paths of all .jpg/.jpeg/.png photos in `folder` (unsorted, no duplicates).
-
-    The set() also removes duplicates: on Windows/macOS "*.jpg" and "*.JPG" would otherwise
-    match the same files twice.
-    """
-    images = set()
-    for pattern in IMAGE_PATTERNS:
-        images.update(glob.glob(glob.escape(folder) + pattern))
-    return list(images)
+    """Returns the paths of all .jpg/.jpeg/.png photos in `folder` (unsorted, no duplicates)."""
+    extensions = {".jpg", ".jpeg", ".png"}
+    with os.scandir(folder) as entries:
+        return [
+            entry.path
+            for entry in entries
+            if entry.is_file() and os.path.splitext(entry.name)[1].lower() in extensions
+        ]
 
 
 def read_exif_datetime(path):
