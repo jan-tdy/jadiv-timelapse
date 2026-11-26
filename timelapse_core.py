@@ -144,10 +144,16 @@ def compute_target_resolution(width, height, resolution_choice):
         target_height = 240
         target_width = int((240 / height) * width)
 
-    # MP4 codecs require both width and height to be even numbers, otherwise they fail
-    target_width -= target_width % 2
-    target_height -= target_height % 2
+    # Bound frames for video encoders and keep tiny dimensions valid after even rounding.
+    scale = min(1.0, 8192 / max(target_width, target_height))
+    target_width = int(target_width * scale)
+    target_height = int(target_height * scale)
 
+    # MP4 codecs require even dimensions and cannot accept zero-sized frames.
+    target_width = max(2, target_width - target_width % 2)
+    target_height = max(2, target_height - target_height % 2)
+
+    return target_width, target_height
     return target_width, target_height
 
 
