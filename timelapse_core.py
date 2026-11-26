@@ -7,7 +7,6 @@ time), and computing the target video resolution while preserving aspect ratio.
 This module must stay free of GUI and OpenCV/FFmpeg dependencies so it can be
 tested anywhere. Pillow is imported lazily, only when EXIF sorting is requested.
 """
-import glob
 import os
 import re
 from datetime import datetime
@@ -17,7 +16,6 @@ SORT_EXIF = "exif"
 SORT_MTIME = "mtime"
 SORT_MODES = (SORT_NAME, SORT_EXIF, SORT_MTIME)
 
-IMAGE_PATTERNS = ('/*.jpg', '/*.jpeg', '/*.png', '/*.JPG', '/*.JPEG', '/*.PNG')
 
 # EXIF tag ids (see the EXIF 2.3 spec); DateTimeOriginal lives in the Exif sub-IFD
 _EXIF_IFD_POINTER = 0x8769
@@ -32,15 +30,14 @@ def natural_sort_key(path):
 
 
 def find_images(folder):
-    """Returns the paths of all .jpg/.jpeg/.png photos in `folder` (unsorted, no duplicates).
-
-    The set() also removes duplicates: on Windows/macOS "*.jpg" and "*.JPG" would otherwise
-    match the same files twice.
-    """
-    images = set()
-    for pattern in IMAGE_PATTERNS:
-        images.update(glob.glob(glob.escape(folder) + pattern))
-    return list(images)
+    """Returns the paths of all .jpg/.jpeg/.png photos in `folder` (unsorted, no duplicates)."""
+    extensions = {".jpg", ".jpeg", ".png"}
+    with os.scandir(folder) as entries:
+        return [
+            entry.path
+            for entry in entries
+            if entry.is_file() and os.path.splitext(entry.name)[1].lower() in extensions
+        ]
 
 
 def read_exif_datetime(path):
